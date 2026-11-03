@@ -1,0 +1,16 @@
+[project]
+name = "short-drama-mobile"
+version = "0.1.0"
+description = "移动端在线播放版（Flet + flet_video）框架测试"
+requires-python = ">=3.10"
+
+[tool.flet]
+org = "com.example"
+product = "short-drama-mobile"
+company = "demo"
+
+[tool.flet.app]
+path = "."
+
+[tool.flet.android]
+# 最低 SDK / 权限由构建时生成；如需 cleartext 流代理，在此追加 manifest 配置
