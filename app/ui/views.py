@@ -58,13 +58,13 @@ def detail_view(state, handlers, page=None):
     eps = []
     for i, vid in enumerate(episodes, start=1):
         eps.append(
-            ft.ElevatedButton(
-                text=f"第{i}集",
+            ft.OutlinedButton(
+                content=f"第{i}集",
                 on_click=lambda e, ep=i, v=vid: handlers["on_play"](ep, v),
             )
         )
 
-    grid = ft.Wrap(eps, spacing=8, run_spacing=8)
+    grid = ft.Row(eps, wrap=True, spacing=8, run_spacing=8)
 
     body = ft.Column(
         [

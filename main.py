@@ -17,8 +17,11 @@ APP_TITLE = "短剧移动版（框架测试）"
 def main(page: ft.Page) -> None:
     page.title = APP_TITLE
     if not is_mobile():
-        page.window.width = 400
-        page.window.height = 820
+        try:
+            page.window.width = 400
+            page.window.height = 820
+        except Exception:  # noqa: BLE001
+            pass
 
     state = AppState()
     handlers: dict = {}
