@@ -89,15 +89,31 @@ def player_view(state, handlers, page=None):
     if state.play_url:
         playlist.append(ft_video.types.VideoMedia(resource=state.play_url))
 
+    status = ft.Text(state.error_message or "", size=12, color=ft.Colors.RED, selectable=True)
+
+    def _set_status(text: str) -> None:
+        try:
+            status.value = text
+            status.update()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_error(e) -> None:
+        _set_status(f"播放错误：{getattr(e, 'data', '')}")
+
+    def _on_load(e) -> None:
+        _set_status("")
+
     video = ft_video.Video(
         playlist=playlist,
         autoplay=True,
         fit=ft.BoxFit.CONTAIN,
         expand=True,
         wakelock=True,
+        on_error=_on_error,
+        on_load=_on_load,
     )
 
-    status = state.error_message
     body = ft.Column(
         [
             ft.Row(
@@ -106,7 +122,7 @@ def player_view(state, handlers, page=None):
                     ft.Text(state.play_title or "播放", size=16, weight=ft.FontWeight.BOLD),
                 ]
             ),
-            ft.Text(status, size=12, color=ft.Colors.RED) if status else ft.Container(height=0),
+            status,
             ft.Container(content=video, expand=True, bgcolor=ft.Colors.BLACK),
         ],
         expand=True,
