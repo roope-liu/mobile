@@ -1,5 +1,6 @@
 import os
 import sys
+import traceback
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
@@ -7,14 +8,32 @@ if BASE_DIR not in sys.path:
 
 import flet as ft
 
-from app.core.state import AppState
-from app.platform import is_mobile
-from app.ui.views import build_app_view
-
 APP_TITLE = "短剧移动版（框架测试）"
 
 
 def main(page: ft.Page) -> None:
+    try:
+        _main(page)
+    except Exception:  # noqa: BLE001
+        try:
+            page.controls.clear()
+            page.add(
+                ft.Text(
+                    "启动失败，请把下面的信息发给开发者：\n\n" + traceback.format_exc(),
+                    size=12,
+                    selectable=True,
+                )
+            )
+            page.update()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _main(page: ft.Page) -> None:
+    from app.core.state import AppState
+    from app.platform import is_mobile
+    from app.ui.views import build_app_view
+
     page.title = APP_TITLE
     if not is_mobile():
         try:
