@@ -4,6 +4,16 @@ import flet_video as ft_video
 from app import settings
 
 
+def _cover_url(item: dict) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in ("series_cover", "cover", "horiz_cover", "cover_url", "thumb_url"):
+        value = (item.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _episode_columns(page) -> int:
     width = getattr(page, "width", None) or 400
     if width < 400:
@@ -25,11 +35,25 @@ def home_view(state, handlers, page=None):
 
     cards = []
     for d in (state.search_results or []):
+        cover = _cover_url(d)
+        leading = (
+            ft.Image(src=cover, width=56, height=76, fit=ft.BoxFit.COVER, border_radius=6)
+            if cover
+            else None
+        )
         cards.append(
             ft.Card(
                 content=ft.ListTile(
+                    leading=leading,
                     title=ft.Text(d["series_name"]),
-                    subtitle=ft.Text(f"{d['episode_cnt']} 集"),
+                    subtitle=ft.Text(
+                        " · ".join(
+                            part for part in (
+                                f"{d['episode_cnt']} 集",
+                                " / ".join(d.get("tags") or []),
+                            ) if part
+                        )
+                    ),
                     on_click=lambda e, sid=d["series_id"]: handlers["on_open_detail"](sid),
                 )
             )
@@ -54,6 +78,7 @@ def home_view(state, handlers, page=None):
 
     settings_panel = ft.ExpansionTile(
         title=ft.Text("播放连接设置"),
+        expanded=not bool(state.stream_base),
         controls=[
             ft.Text("填入你创建的 HTTPS 隧道地址，例如 https://xxxx.example-tunnel.com；不填则播放演示视频。", size=12, color=ft.Colors.GREY),
             ft.Row([
@@ -66,6 +91,9 @@ def home_view(state, handlers, page=None):
     body = ft.Column(
         [
             ft.Row([tf, search_btn]),
+            ft.Text(state.error_message, size=12, color=ft.Colors.ORANGE)
+            if state.error_message
+            else ft.Container(height=0),
             settings_panel,
             ft.Text(
                 f"共 {len(cards)} 条结果" if cards else "输入关键词搜索（真实源站搜索）",
@@ -97,15 +125,38 @@ def detail_view(state, handlers, page=None):
 
     grid = ft.Row(eps, wrap=True, spacing=8, run_spacing=8)
 
+    cover = _cover_url(d)
+    intro = (d.get("series_intro") or d.get("video_desc") or "").strip()
+    tags = " / ".join(d.get("tags") or [])
+    info_column = ft.Column(
+        [
+            ft.Text(d["series_name"], size=18, weight=ft.FontWeight.BOLD),
+            ft.Text(f"{len(episodes)} 集" + (f" · {tags}" if tags else ""), size=12, color=ft.Colors.GREY),
+            ft.Text(intro, size=12, max_lines=4, overflow=ft.TextOverflow.ELLIPSIS) if intro else ft.Container(height=0),
+        ],
+        expand=True,
+        spacing=4,
+    )
+    header = ft.Row(
+        [
+            ft.Image(src=cover, width=96, height=132, fit=ft.BoxFit.COVER, border_radius=8)
+            if cover else ft.Container(width=0),
+            info_column,
+        ],
+        vertical_alignment=ft.CrossAxisAlignment.START,
+        spacing=12,
+    )
+
     body = ft.Column(
         [
             ft.Row(
                 [
                     ft.IconButton(icon=ft.Icons.ARROW_BACK, on_click=handlers["on_back"]),
-                    ft.Text(d["series_name"], size=18, weight=ft.FontWeight.BOLD),
+                    ft.Text("详情", size=16, weight=ft.FontWeight.BOLD),
                 ]
             ),
-            ft.Text(f"{len(episodes)} 集", size=12, color=ft.Colors.GREY),
+            header,
+            ft.Divider(),
             grid,
         ],
         scroll=ft.ScrollMode.AUTO,
@@ -116,11 +167,25 @@ def detail_view(state, handlers, page=None):
 
 
 def player_view(state, handlers, page=None):
+    from app.services.playback_service import stream_base
+
     playlist = []
     if state.play_url:
         playlist.append(ft_video.types.VideoMedia(resource=state.play_url))
 
     status = ft.Text(state.error_message or "", size=12, color=ft.Colors.RED, selectable=True)
+    demo_hint = (
+        ft.Container(
+            content=ft.Text(
+                "未配置播放代理，当前播放的是演示视频。请在首页“播放连接设置”填入隧道地址后重试。",
+                size=11,
+                color=ft.Colors.ORANGE,
+            ),
+            padding=6,
+        )
+        if not stream_base()
+        else ft.Container(height=0)
+    )
 
     def _set_status(text: str) -> None:
         try:
@@ -153,6 +218,7 @@ def player_view(state, handlers, page=None):
                     ft.Text(state.play_title or "播放", size=16, weight=ft.FontWeight.BOLD),
                 ]
             ),
+            demo_hint,
             status,
             ft.Container(content=video, expand=True, bgcolor=ft.Colors.BLACK),
         ],

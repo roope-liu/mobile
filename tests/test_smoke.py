@@ -58,8 +58,32 @@ def test_views_build():
     state.search_results = search(state.keyword)
     assert build_app_view(state, handlers) is not None
 
+    # 带封面的真实结构，确保图片控件构建路径被覆盖
+    state.search_results = [
+        {
+            "series_id": "1",
+            "series_name": "带封面",
+            "episode_cnt": 2,
+            "series_cover": "https://example.com/cover.jpg",
+            "tags": ["都市", "逆袭"],
+            "vid_list": ["v1", "v2"],
+        }
+    ]
+    assert build_app_view(state, handlers) is not None
+
     state.current_drama = get_drama("1001")
     state.current_view = "detail"
+    assert build_app_view(state, handlers) is not None
+
+    state.current_drama = {
+        "series_id": "1",
+        "series_name": "带封面详情",
+        "episode_cnt": 2,
+        "series_cover": "https://example.com/cover.jpg",
+        "series_intro": "简介内容",
+        "tags": ["都市"],
+        "vid_list": ["v1", "v2"],
+    }
     assert build_app_view(state, handlers) is not None
 
     state.play_title = "第1集"
