@@ -76,14 +76,31 @@ def home_view(state, handlers, page=None):
         except Exception:  # noqa: BLE001
             pass
 
+    engine_status = ft.Text("", size=12, color=ft.Colors.GREY)
+
+    def check_engine(e):
+        from app.services.ondevice import find_ffmpeg
+
+        path = find_ffmpeg()
+        engine_status.value = f"本地解码引擎：{path}" if path else "本地解码引擎：未找到（将回退代理/演示）"
+        engine_status.color = ft.Colors.GREEN if path else ft.Colors.ORANGE
+        try:
+            engine_status.update()
+        except Exception:  # noqa: BLE001
+            pass
+
     settings_panel = ft.ExpansionTile(
         title=ft.Text("播放连接设置"),
         expanded=not bool(state.stream_base),
         controls=[
-            ft.Text("填入你创建的 HTTPS 隧道地址，例如 https://xxxx.example-tunnel.com；不填则播放演示视频。", size=12, color=ft.Colors.GREY),
+            ft.Text("优先使用手机本地解码；未检测到本地引擎时才使用下面的代理地址。", size=12, color=ft.Colors.GREY),
             ft.Row([
                 stream_field,
                 ft.TextButton("保存", on_click=save_stream_base),
+            ]),
+            ft.Row([
+                ft.TextButton("检测本地解码引擎", on_click=check_engine),
+                engine_status,
             ]),
         ],
     )
