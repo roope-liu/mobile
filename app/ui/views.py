@@ -1,6 +1,8 @@
 import flet as ft
 import flet_video as ft_video
 
+from app import settings
+
 
 def _episode_columns(page) -> int:
     width = getattr(page, "width", None) or 400
@@ -33,11 +35,40 @@ def home_view(state, handlers, page=None):
             )
         )
 
+    stream_field = ft.TextField(
+        value=state.stream_base,
+        hint_text="流代理隧道地址（可选）",
+        label="播放代理地址",
+        keyboard_type=ft.KeyboardType.URL,
+        expand=True,
+    )
+
+    def save_stream_base(e):
+        state.stream_base = (stream_field.value or "").strip().rstrip("/")
+        settings.set_stream_base(state.stream_base)
+        try:
+            e.control.content = "已保存"
+            e.control.update()
+        except Exception:  # noqa: BLE001
+            pass
+
+    settings_panel = ft.ExpansionTile(
+        title=ft.Text("播放连接设置"),
+        controls=[
+            ft.Text("填入你创建的 HTTPS 隧道地址，例如 https://xxxx.example-tunnel.com；不填则播放演示视频。", size=12, color=ft.Colors.GREY),
+            ft.Row([
+                stream_field,
+                ft.TextButton("保存", on_click=save_stream_base),
+            ]),
+        ],
+    )
+
     body = ft.Column(
         [
             ft.Row([tf, search_btn]),
+            settings_panel,
             ft.Text(
-                f"共 {len(cards)} 条结果" if cards else "输入关键词搜索（框架测试数据）",
+                f"共 {len(cards)} 条结果" if cards else "输入关键词搜索（真实源站搜索）",
                 size=12,
                 color=ft.Colors.GREY,
             ),

@@ -10,6 +10,7 @@ venv/
 build/
 dist/
 .data/
+server/cache/
 assets/icons/
 *.apk
 *.aab

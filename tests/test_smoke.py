@@ -33,6 +33,18 @@ def test_mock_search():
     assert drama["vid_list"]
 
 
+def test_settings_roundtrip(tmp_path, monkeypatch):
+    from app import settings
+    from app.services.playback_service import resolve_play_url
+
+    monkeypatch.setattr(settings, "data_dir", lambda: str(tmp_path))
+    monkeypatch.delenv("STREAM_BASE", raising=False)
+
+    settings.set_stream_base("https://demo.tunnel.test/stream/")
+    assert settings.stream_base() == "https://demo.tunnel.test/stream"
+    assert resolve_play_url("7666404568275635224") == "https://demo.tunnel.test/stream/7666404568275635224.mp4"
+
+
 def test_views_build():
     from app.core.state import AppState
     from app.ui.views import build_app_view

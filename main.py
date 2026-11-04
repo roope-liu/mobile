@@ -23,7 +23,10 @@ def main(page: ft.Page) -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    from app import settings
+
     state = AppState()
+    state.stream_base = settings.stream_base()
     handlers: dict = {}
 
     def rerender() -> None:
@@ -32,14 +35,30 @@ def main(page: ft.Page) -> None:
         page.update()
 
     def on_search() -> None:
-        from app.services.mock_service import search
-        state.search_results = search(state.keyword)
+        state.error_message = ""
+        try:
+            from app.services.search_service import search_dramas
+            state.search_results = search_dramas(state.keyword)
+        except Exception:  # noqa: BLE001
+            from app.services.mock_service import search as mock_search
+            state.search_results = mock_search(state.keyword)
+            state.error_message = "源站搜索失败，已显示测试数据"
         state.current_view = "home"
         rerender()
 
     def on_open_detail(series_id) -> None:
-        from app.services.mock_service import get_drama
-        drama = get_drama(str(series_id))
+        drama = None
+        state.error_message = ""
+        try:
+            from app.services.detail_service import get_drama
+            drama = get_drama(str(series_id))
+        except Exception:  # noqa: BLE001
+            drama = None
+        if not drama:
+            from app.services.mock_service import get_drama as mock_get_drama
+            drama = mock_get_drama(str(series_id))
+            if drama:
+                state.error_message = "源站详情失败，已显示测试数据"
         if not drama:
             return
         state.current_drama = drama

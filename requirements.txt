@@ -1,3 +1,8 @@
 flet>=1.0.5
 flet-video>=1.0.5
+requests>=2.31
+betterproto==2.0.0b7
+grpclib>=0.4
+python-dateutil>=2.8
+typing-extensions>=4.0
 pytest>=8.0
