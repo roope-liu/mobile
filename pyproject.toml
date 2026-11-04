@@ -14,3 +14,7 @@ path = "."
 
 [tool.flet.android]
 # 最低 SDK / 权限由构建时生成；如需 cleartext 流代理，在此追加 manifest 配置
+
+[tool.flet.flutter.pubspec.dependencies]
+# 提供 arm64 libffmpeg.so，运行时可执行，用于本机解密/重封装
+ffmpeg_bin = { path = "../../flutter/ffmpeg_bin" }

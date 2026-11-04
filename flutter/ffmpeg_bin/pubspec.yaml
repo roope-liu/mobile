@@ -1,0 +1,15 @@
+name: ffmpeg_bin
+description: Bundles a static FFmpeg executable as an Android native library.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.ffmpeg_bin
+        pluginClass: FfmpegBinPlugin

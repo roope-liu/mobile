@@ -87,6 +87,10 @@ def test_views_build():
     assert build_app_view(state, handlers) is not None
 
     state.play_title = "第1集"
+    state.loading_message = "正在准备视频…"
+    state.current_view = "loading"
+    assert build_app_view(state, handlers) is not None
+
     state.play_url = "https://example.com/demo.mp4"
     state.current_view = "player"
     assert build_app_view(state, handlers) is not None

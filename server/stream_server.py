@@ -28,6 +28,8 @@ QUALITY = os.environ.get("STREAM_QUALITY", "best")
 app = Flask(__name__)
 _locks: dict = {}
 _locks_guard = threading.Lock()
+_jobs: dict = {}
+_jobs_guard = threading.Lock()
 
 
 def _lock_for(vid: str) -> threading.Lock:
@@ -109,16 +111,86 @@ def healthz():
     return jsonify(ok=True)
 
 
+def _build_and_publish(vid: str) -> None:
+    path = os.path.join(CACHE_DIR, f"{vid}.mp4")
+    try:
+        with _lock_for(vid):
+            if not os.path.exists(path) or os.path.getsize(path) == 0:
+                _build(vid, path)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("stream build failed for vid=%s", vid)
+        with _jobs_guard:
+            _jobs[vid] = {"status": "error", "error": str(exc)}
+    else:
+        with _jobs_guard:
+            _jobs[vid] = {"status": "ready"}
+
+
 @app.get("/stream/<vid>.mp4")
 def stream(vid: str):
     vid = (vid or "").strip()
     if not vid.isdigit() or len(vid) < 10:
         abort(400, description="vid 非法")
-    try:
-        path = _ensure(vid)
-    except Exception as exc:  # noqa: BLE001
-        abort(502, description=str(exc))
-    return send_file(path, mimetype="video/mp4", conditional=True)
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = os.path.join(CACHE_DIR, f"{vid}.mp4")
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return send_file(path, mimetype="video/mp4", conditional=True)
+
+    with _jobs_guard:
+        job = _jobs.get(vid)
+        if job and job.get("status") == "error":
+            _jobs.pop(vid, None)
+            abort(502, description=job.get("error") or "构建流失败")
+        if not job:
+            _jobs[vid] = {"status": "building"}
+            threading.Thread(target=_build_and_publish, args=(vid,), daemon=True).start()
+
+    response = jsonify(
+        status="building",
+        message="视频正在准备中。请等待 3-8 秒后由播放器自动重试。",
+        retry_after=3,
+        stream_url=f"/stream/{vid}.mp4",
+    )
+    response.status_code = 202
+    response.headers["Retry-After"] = "3"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/prepare/<vid>.mp4")
+def prepare(vid: str):
+    vid = (vid or "").strip()
+    if not vid.isdigit() or len(vid) < 10:
+        abort(400, description="vid 非法")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = os.path.join(CACHE_DIR, f"{vid}.mp4")
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return jsonify(ready=True, state="ready")
+    with _jobs_guard:
+        job = _jobs.get(vid)
+        if job and job.get("status") == "error":
+            _jobs.pop(vid, None)
+            job = None
+        if not job:
+            _jobs[vid] = {"status": "building"}
+            threading.Thread(target=_build_and_publish, args=(vid,), daemon=True).start()
+    return jsonify(ready=False, state="building")
+
+
+@app.get("/status/<vid>.mp4")
+def build_status(vid: str):
+    vid = (vid or "").strip()
+    if not vid.isdigit() or len(vid) < 10:
+        abort(400, description="vid 非法")
+    path = os.path.join(CACHE_DIR, f"{vid}.mp4")
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return jsonify(ready=True, state="ready")
+    with _jobs_guard:
+        job = _jobs.get(vid)
+    if not job:
+        return jsonify(ready=False, state="idle")
+    return jsonify(ready=False, state=job.get("status"), error=job.get("error"))
 
 
 if __name__ == "__main__":

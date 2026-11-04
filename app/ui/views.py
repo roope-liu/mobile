@@ -173,7 +173,12 @@ def player_view(state, handlers, page=None):
     if state.play_url:
         playlist.append(ft_video.types.VideoMedia(resource=state.play_url))
 
-    status = ft.Text(state.error_message or "", size=12, color=ft.Colors.RED, selectable=True)
+    status = ft.Text(
+        state.error_message or state.loading_message or "",
+        size=12,
+        color=ft.Colors.RED if state.error_message else ft.Colors.GREY,
+        selectable=True,
+    )
     demo_hint = (
         ft.Container(
             content=ft.Text(
@@ -228,7 +233,40 @@ def player_view(state, handlers, page=None):
     return ft.SafeArea(body, expand=True)
 
 
+def loading_view(state, handlers, page=None):
+    return ft.SafeArea(
+        ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.IconButton(icon=ft.Icons.ARROW_BACK, on_click=handlers["on_back"]),
+                        ft.Text(state.play_title or "加载中", size=16, weight=ft.FontWeight.BOLD),
+                    ]
+                ),
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.ProgressRing(),
+                            ft.Text(state.loading_message or "正在准备视频…", size=13, color=ft.Colors.GREY),
+                            ft.Text("首次播放需要在本机解密并合并音视频，通常 3~20 秒", size=11, color=ft.Colors.GREY),
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=12,
+                    ),
+                    expand=True,
+                    alignment=ft.Alignment.CENTER,
+                ),
+            ],
+            expand=True,
+            spacing=8,
+        ),
+        expand=True,
+    )
+
+
 def build_app_view(state, handlers, page=None):
+    if state.current_view == "loading":
+        return loading_view(state, handlers, page)
     if state.current_view == "detail":
         return detail_view(state, handlers, page)
     if state.current_view == "player":

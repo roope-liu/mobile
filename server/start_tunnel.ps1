@@ -20,8 +20,8 @@ if (-not (Test-Path $python)) {
 $server = Start-Process -FilePath $python -ArgumentList "`"$PSScriptRoot\stream_server.py`"" -PassThru -WindowStyle Hidden
 try {
     Write-Host "流代理已启动：http://127.0.0.1:$Port"
-    Write-Host "接下来 cloudflared 会输出 HTTPS 隧道地址，把它填入 APP 的‘播放代理地址’。"
-    cloudflared tunnel --url "http://127.0.0.1:$Port"
+    Write-Host "接下来会输出一个 https://xxx.loca.lt 的隧道地址，把它填入 APP 的‘播放代理地址’。"
+    npx --yes localtunnel --port $Port
 }
 finally {
     if ($server -and -not $server.HasExited) {

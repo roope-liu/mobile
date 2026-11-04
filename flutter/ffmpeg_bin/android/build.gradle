@@ -1,0 +1,19 @@
+group 'com.example.ffmpeg_bin'
+version '1.0.0'
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.example.ffmpeg_bin'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 21
+        targetSdk 34
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}

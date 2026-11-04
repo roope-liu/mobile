@@ -65,15 +65,81 @@ def main(page: ft.Page) -> None:
         state.current_view = "detail"
         rerender()
 
+        from app.services.ondevice import find_ffmpeg, local_video_path
+        from app.services.playback_service import prepare_stream, stream_base
+
+        vids = drama.get("vid_list") or []
+        if not vids:
+            return
+        if find_ffmpeg():
+            vid = vids[0]
+
+            def prefetch():
+                try:
+                    local_video_path(vid)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            page.run_thread(prefetch)
+        elif stream_base():
+            page.run_thread(lambda: prepare_stream(vids[0]))
+
     def on_back(e=None) -> None:
         state.current_view = "home"
         rerender()
 
     def on_play(episode: int, vid: str) -> None:
-        from app.services.playback_service import resolve_play_url
+        from pathlib import Path
+
+        from app.services.ondevice import find_ffmpeg, local_video_path
+        from app.services.playback_service import prepare_stream, resolve_play_url, stream_base
+
         state.play_title = f"第{episode}集"
+        state.play_url = ""
+        state.error_message = ""
+        state.loading_message = ""
+
+        if find_ffmpeg():
+            state.current_view = "loading"
+            state.loading_message = f"正在下载并解密第{episode}集（首次约 20MB）…"
+            rerender()
+
+            def play_local():
+                try:
+                    path = local_video_path(vid)
+                    state.play_url = Path(path).as_uri()
+                    state.current_view = "player"
+                except Exception as exc:  # noqa: BLE001
+                    state.error_message = f"本地播放失败：{exc}"
+                    state.current_view = "player"
+                state.loading_message = ""
+                rerender()
+
+            page.run_thread(play_local)
+            return
+
         state.play_url = resolve_play_url(vid) or ""
-        state.error_message = "" if state.play_url else "无法解析播放地址"
+
+        if stream_base():
+            state.current_view = "loading"
+            state.loading_message = "正在请求流代理准备视频…"
+            rerender()
+
+            def prepare():
+                ready = prepare_stream(vid)
+                if ready:
+                    state.loading_message = ""
+                    state.current_view = "player"
+                else:
+                    state.error_message = "流代理准备视频失败或超时；请检查隧道和代理服务。"
+                    state.loading_message = ""
+                    state.current_view = "player"
+                rerender()
+
+            page.run_thread(prepare)
+            return
+
+        state.error_message = ""
         state.current_view = "player"
         rerender()
 

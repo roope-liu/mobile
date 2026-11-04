@@ -25,6 +25,38 @@ def stream_base() -> str:
     return env or settings.stream_base()
 
 
+def prepare_stream(vid: str, timeout: int = 240) -> bool:
+    """请求流代理在后台准备（下载/解密/mux），轮询直到就绪。"""
+    base = stream_base()
+    vid = str(vid or "").strip()
+    if not base or not vid:
+        return False
+
+    import time
+
+    import requests
+
+    try:
+        requests.get(f"{base}/prepare/{vid}.mp4", timeout=20)
+    except Exception:  # noqa: BLE001
+        pass
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            resp = requests.get(f"{base}/status/{vid}.mp4", timeout=10)
+            if resp.ok:
+                data = resp.json()
+                if data.get("ready"):
+                    return True
+                if data.get("state") == "error":
+                    return False
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(2)
+    return False
+
+
 def resolve_play_url(vid: str, quality: str = "best") -> str | None:
     vid = (vid or "").strip() if isinstance(vid, str) else str(vid).strip()
     if not vid:
