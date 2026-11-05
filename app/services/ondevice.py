@@ -156,53 +156,90 @@ def _so_paths(lines):
     return paths
 
 
-def _android_native_lib_dir():
-    lines = _maps_lines()
-    paths = [p for p in _so_paths(lines) if p.startswith("/data/")]
+def _package_name():
+    base = (os.getenv("FLET_APP_STORAGE_DATA") or "").replace("\\", "/")
+    parts = [p for p in base.split("/") if p]
+    if "user" in parts:
+        i = parts.index("user")
+        if i + 2 < len(parts):
+            return parts[i + 2]
+    if "data" in parts and len(parts) > 2:
+        return parts[2]
+    return None
 
+
+def _device_abi():
+    machine = (os.uname().machine or "").lower() if hasattr(os, "uname") else ""
+    return {
+        "aarch64": "arm64",
+        "armv8l": "arm",
+        "armv7l": "arm",
+        "x86_64": "x86_64",
+        "amd64": "x86_64",
+        "i686": "x86",
+        "i386": "x86",
+    }.get(machine, machine)
+
+
+def _pm_apk_paths():
+    pkg = _package_name()
+    if not pkg:
+        return []
+    try:
+        out = subprocess.run(
+            ["/system/bin/pm", "path", pkg],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:  # noqa: BLE001
+        return []
+    return [line.split("package:", 1)[1].strip() for line in out.splitlines() if line.startswith("package:")]
+
+
+def _native_lib_dirs():
     dirs = []
-    apk_dirs = []
-    for p in paths:
+    abi = _device_abi()
+
+    for apk in _pm_apk_paths():
+        base = os.path.dirname(apk)
+        for name in (abi, abi + "-v8a", "arm64-v8a", "armeabi-v7a", "arm64", "x86_64"):
+            dirs.append(os.path.join(base, "lib", name))
+
+    lines = _maps_lines()
+    for p in _so_paths(lines):
+        if not p.startswith("/data/"):
+            continue
         if "!/lib/" in p:
-            apk, _, abi = p.partition("!/lib/")
-            abi = abi.split("/")[0]
-            apk_dirs.append((os.path.dirname(apk), abi))
+            apk, _, tail = p.partition("!/lib/")
+            abi_dir = tail.split("/")[0]
+            dirs.append(os.path.join(os.path.dirname(apk), "lib", abi_dir))
         else:
             dirs.append(os.path.dirname(p))
+    return list(dict.fromkeys(dirs))
 
-    for d in dict.fromkeys(dirs):
+
+def _android_native_lib_dir():
+    for d in _native_lib_dirs():
         if os.path.isfile(os.path.join(d, "libffmpeg.so")):
             return d
-
-    for apk_dir, abi in apk_dirs:
-        for name in (abi, abi.replace("-", ""), "arm64", "arm64-v8a"):
-            d = os.path.join(apk_dir, "lib", name)
-            if os.path.isfile(os.path.join(d, "libffmpeg.so")):
-                return d
-
-    for d in dict.fromkeys(dirs):
-        try:
-            if any(n.startswith(("libflutter", "libpython", "libserious")) for n in os.listdir(d)):
-                return d
-        except OSError:
-            continue
     return None
 
 
 def diagnose_engine() -> str:
     lines = _maps_lines()
     data_so = [p for p in _so_paths(lines) if p.startswith("/data/")]
-    native = _android_native_lib_dir()
+    dirs = _native_lib_dirs()
     found = find_ffmpeg()
     parts = [
         f"ffmpeg={found or 'None'}",
-        f"nativeLib={native or 'None'}",
+        f"pkg={_package_name() or 'None'} abi={_device_abi() or 'None'}",
+        f"nativeLib={_android_native_lib_dir() or 'None'}",
         f"mapsLines={len(lines)} dataSo={len(data_so)}",
     ]
-    if native:
-        parts.append(f"libffmpeg存在={os.path.isfile(os.path.join(native, 'libffmpeg.so'))}")
+    for d in dirs[:4]:
+        exists = os.path.isfile(os.path.join(d, "libffmpeg.so"))
+        parts.append(f"dir={d} libffmpeg存在={exists}")
     if data_so:
-        parts.append("sample=" + " | ".join(data_so[:3]))
+        parts.append("sample=" + " | ".join(data_so[:2]))
     return "\n".join(parts)
 
 

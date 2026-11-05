@@ -44,30 +44,41 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Build bundled ffmpeg (Android arm64)
+      - name: Build bundled ffmpeg (Android arm64 and x86_64)
         run: |
           set -e
           NDK="${ANDROID_NDK_LATEST_HOME:-$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)}"
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
           git clone --depth 1 --branch n8.0 https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg
           cd /tmp/ffmpeg
-          ./configure --target-os=android --arch=aarch64 --cpu=armv8-a \
-            --enable-cross-compile --sysroot="$TOOLCHAIN/sysroot" \
-            --cc="$TOOLCHAIN/bin/aarch64-linux-android21-clang" \
-            --cxx="$TOOLCHAIN/bin/aarch64-linux-android21-clang++" \
-            --ar="$TOOLCHAIN/bin/llvm-ar" --ranlib="$TOOLCHAIN/bin/llvm-ranlib" \
-            --nm="$TOOLCHAIN/bin/llvm-nm" --strip="$TOOLCHAIN/bin/llvm-strip" \
-            --disable-everything --disable-network --disable-autodetect --disable-doc \
-            --disable-ffprobe --disable-ffplay --enable-ffmpeg --enable-small \
-            --enable-protocol=file --enable-demuxer=mov --enable-muxer=mp4 \
-            --enable-parser=hevc --enable-decoder=hevc \
-            --extra-cflags="-fPIE" --extra-ldflags="-static -pie"
-          make -j"$(nproc)" ffmpeg
-          DEST="$GITHUB_WORKSPACE/flutter/ffmpeg_bin/android/src/main/jniLibs/arm64-v8a"
-          mkdir -p "$DEST"
-          cp ffmpeg "$DEST/libffmpeg.so"
-          chmod 755 "$DEST/libffmpeg.so"
-          ls -lh "$DEST/libffmpeg.so"
+
+          build_ffmpeg() {
+            arch="$1"
+            cpu="$2"
+            abi="$3"
+            triple="$4"
+            ./configure --target-os=android --arch="$arch" --cpu="$cpu" \
+              --enable-cross-compile --sysroot="$TOOLCHAIN/sysroot" \
+              --cc="$TOOLCHAIN/bin/${triple}21-clang" \
+              --cxx="$TOOLCHAIN/bin/${triple}21-clang++" \
+              --ar="$TOOLCHAIN/bin/llvm-ar" --ranlib="$TOOLCHAIN/bin/llvm-ranlib" \
+              --nm="$TOOLCHAIN/bin/llvm-nm" --strip="$TOOLCHAIN/bin/llvm-strip" \
+              --disable-everything --disable-network --disable-autodetect --disable-doc \
+              --disable-ffprobe --disable-ffplay --enable-ffmpeg --enable-small \
+              --enable-protocol=file --enable-demuxer=mov --enable-muxer=mp4 \
+              --enable-parser=hevc --enable-decoder=hevc \
+              --extra-cflags="-fPIE" --extra-ldflags="-static -pie"
+            make -j"$(nproc)" ffmpeg
+            dest="$GITHUB_WORKSPACE/flutter/ffmpeg_bin/android/src/main/jniLibs/$abi"
+            mkdir -p "$dest"
+            cp ffmpeg "$dest/libffmpeg.so"
+            chmod 755 "$dest/libffmpeg.so"
+            make distclean
+          }
+
+          build_ffmpeg aarch64 armv8-a arm64-v8a aarch64-linux-android
+          build_ffmpeg x86_64 x86-64 x86_64 x86_64-linux-android
+          find "$GITHUB_WORKSPACE/flutter/ffmpeg_bin/android/src/main/jniLibs" -name libffmpeg.so -exec ls -lh {} \;
 
       - name: Install Python deps
         run: |
