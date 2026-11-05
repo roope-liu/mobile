@@ -139,16 +139,71 @@ def decrypt_mp4(enc_path, key_hex, out_path):
 
 # ---------- ffmpeg 查找 ----------
 
-def _android_native_lib_dir():
+def _maps_lines():
     try:
         with open("/proc/self/maps", "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                m = re.search(r"(/data/app/[^\s]+?/lib/[^/\s]+)/lib[^\s/]+\.so", line)
-                if m:
-                    return m.group(1)
+            return f.read().splitlines()
     except OSError:
-        pass
+        return []
+
+
+def _so_paths(lines):
+    paths = []
+    for line in lines:
+        parts = line.split()
+        if parts and parts[-1].endswith(".so"):
+            paths.append(parts[-1])
+    return paths
+
+
+def _android_native_lib_dir():
+    lines = _maps_lines()
+    paths = [p for p in _so_paths(lines) if p.startswith("/data/")]
+
+    dirs = []
+    apk_dirs = []
+    for p in paths:
+        if "!/lib/" in p:
+            apk, _, abi = p.partition("!/lib/")
+            abi = abi.split("/")[0]
+            apk_dirs.append((os.path.dirname(apk), abi))
+        else:
+            dirs.append(os.path.dirname(p))
+
+    for d in dict.fromkeys(dirs):
+        if os.path.isfile(os.path.join(d, "libffmpeg.so")):
+            return d
+
+    for apk_dir, abi in apk_dirs:
+        for name in (abi, abi.replace("-", ""), "arm64", "arm64-v8a"):
+            d = os.path.join(apk_dir, "lib", name)
+            if os.path.isfile(os.path.join(d, "libffmpeg.so")):
+                return d
+
+    for d in dict.fromkeys(dirs):
+        try:
+            if any(n.startswith(("libflutter", "libpython", "libserious")) for n in os.listdir(d)):
+                return d
+        except OSError:
+            continue
     return None
+
+
+def diagnose_engine() -> str:
+    lines = _maps_lines()
+    data_so = [p for p in _so_paths(lines) if p.startswith("/data/")]
+    native = _android_native_lib_dir()
+    found = find_ffmpeg()
+    parts = [
+        f"ffmpeg={found or 'None'}",
+        f"nativeLib={native or 'None'}",
+        f"mapsLines={len(lines)} dataSo={len(data_so)}",
+    ]
+    if native:
+        parts.append(f"libffmpeg存在={os.path.isfile(os.path.join(native, 'libffmpeg.so'))}")
+    if data_so:
+        parts.append("sample=" + " | ".join(data_so[:3]))
+    return "\n".join(parts)
 
 
 def find_ffmpeg():
