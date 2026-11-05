@@ -1,1 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- 让 jniLibs 中的 libffmpeg.so 解压到 nativeLibraryDir，运行时可执行 -->
+    <application
+        android:extractNativeLibs="true"
+        tools:replace="android:extractNativeLibs" />
+</manifest>

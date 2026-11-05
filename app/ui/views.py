@@ -79,11 +79,22 @@ def home_view(state, handlers, page=None):
     engine_status = ft.Text("", size=12, color=ft.Colors.GREY)
 
     def check_engine(e):
-        from app.services.ondevice import find_ffmpeg
+        import os
+
+        from app.services.ondevice import _android_native_lib_dir, find_ffmpeg
 
         path = find_ffmpeg()
-        engine_status.value = f"本地解码引擎：{path}" if path else "本地解码引擎：未找到（将回退代理/演示）"
-        engine_status.color = ft.Colors.GREEN if path else ft.Colors.ORANGE
+        if path:
+            engine_status.value = f"本地解码引擎：{path}"
+            engine_status.color = ft.Colors.GREEN
+        else:
+            native = _android_native_lib_dir()
+            if native:
+                exists = os.path.exists(os.path.join(native, "libffmpeg.so"))
+                engine_status.value = f"未找到 ffmpeg；nativeLib={native}，libffmpeg.so 存在={exists}"
+            else:
+                engine_status.value = "未找到 ffmpeg；未解析到 nativeLib 目录（将回退代理/演示）"
+            engine_status.color = ft.Colors.ORANGE
         try:
             engine_status.update()
         except Exception:  # noqa: BLE001
