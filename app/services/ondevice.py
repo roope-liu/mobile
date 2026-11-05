@@ -222,7 +222,12 @@ def _native_lib_dirs():
 
 def _abi_candidates():
     names = []
-    abi = _device_abi()
+    native = _android_native_lib_dir()
+    if native:
+        installed = os.path.basename(native)
+        names.append(installed)
+        if installed == "arm64":
+            names.append("arm64-v8a")
     machine = (os.uname().machine or "").lower() if hasattr(os, "uname") else ""
     if machine in ("aarch64", "armv8l", "armv7l"):
         names += ["arm64-v8a", "armeabi-v7a"]
@@ -230,8 +235,9 @@ def _abi_candidates():
         names += ["x86_64"]
     else:
         names += ["x86_64", "arm64-v8a", "armeabi-v7a"]
+    abi = _device_abi()
     if abi and abi not in names:
-        names.insert(0, abi)
+        names.append(abi)
     return list(dict.fromkeys(names))
 
 
@@ -241,11 +247,23 @@ def _extract_ffmpeg_from_apks():
     Flet/serious_python 打包时不会解压 native libs（AGP 默认 useLegacyPackaging=false），
     /data/app 下没有可执行文件。APK 本身可读，因此把目标 ABI 的二进制解出来再执行。
     """
-    target = os.path.join(data_dir(), "bin", "ffmpeg")
-    if os.path.isfile(target) and os.path.getsize(target) > 0:
-        return target
+    apk_paths = _pm_apk_paths()
+    if not apk_paths:
+        return None
 
-    for apk in _pm_apk_paths():
+    legacy = os.path.join(data_dir(), "bin", "ffmpeg")
+    if os.path.isfile(legacy):
+        try:
+            os.remove(legacy)
+        except OSError:
+            pass
+
+    for abi in _abi_candidates():
+        target = os.path.join(data_dir(), "bin", f"ffmpeg-{abi}")
+        if os.path.isfile(target) and os.path.getsize(target) > 0:
+            return target
+
+    for apk in apk_paths:
         try:
             with zipfile.ZipFile(apk) as zf:
                 names = set(zf.namelist())
@@ -253,6 +271,7 @@ def _extract_ffmpeg_from_apks():
                     member = f"lib/{abi}/libffmpeg.so"
                     if member not in names:
                         continue
+                    target = os.path.join(data_dir(), "bin", f"ffmpeg-{abi}")
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     with zf.open(member) as src, open(target, "wb") as dst:
                         while True:
@@ -311,17 +330,18 @@ def find_ffmpeg():
     if env and os.path.isfile(env):
         return env
 
-    candidates = [os.path.join(data_dir(), "ffmpeg"), os.path.join(data_dir(), "bin", "ffmpeg")]
+    candidates = []
+    if _pm_apk_paths():
+        extracted = _extract_ffmpeg_from_apks()
+        if extracted:
+            candidates.append(extracted)
     native = _android_native_lib_dir()
     if native:
         candidates += [
             os.path.join(native, "libffmpeg.so"),
             os.path.join(native, "ffmpeg"),
         ]
-    if _pm_apk_paths():
-        extracted = _extract_ffmpeg_from_apks()
-        if extracted:
-            candidates.insert(0, extracted)
+    candidates += [os.path.join(data_dir(), "ffmpeg"), os.path.join(data_dir(), "bin", "ffmpeg")]
     for path in candidates:
         if os.path.isfile(path):
             if not os.access(path, os.X_OK):
@@ -335,20 +355,23 @@ def find_ffmpeg():
 
 def _remux(dec_path, out_path, ffmpeg):
     cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", dec_path,
-           "-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart", "-f", "mp4", out_path]
+           "-map", "0:v:0", "-an", "-c", "copy", "-tag:v", "hvc1",
+           "-movflags", "+faststart", "-f", "mp4", out_path]
     result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
     if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-        raise RuntimeError(f"ffmpeg 重封装失败：{result.stderr[:300]}")
+        detail = (result.stderr or "").strip()[:300] or f"rc={result.returncode}"
+        raise RuntimeError(f"ffmpeg 重封装失败：{detail}")
 
 
 def _decrypt_remux(enc_path, out_path, key_hex, ffmpeg):
     """ffmpeg 一步完成 CENC 解密 + hvc1 重封装（仅 bytevc1 轨可用）。"""
     cmd = [ffmpeg, "-y", "-loglevel", "error", "-decryption_key", key_hex,
-           "-i", enc_path, "-c", "copy", "-tag:v", "hvc1",
+           "-i", enc_path, "-map", "0:v:0", "-an", "-c", "copy", "-tag:v", "hvc1",
            "-movflags", "+faststart", "-f", "mp4", out_path]
     result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
     if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-        raise RuntimeError(f"ffmpeg 解密重封装失败：{result.stderr[:300]}")
+        detail = (result.stderr or "").strip()[:300] or f"rc={result.returncode}"
+        raise RuntimeError(f"ffmpeg 解密重封装失败：{detail}")
 
 
 def _pick_track(tracks):
