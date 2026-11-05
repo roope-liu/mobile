@@ -8,6 +8,9 @@ on:
       - '**'
       - '.github/workflows/build-mobile-apk.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -83,3 +86,20 @@ jobs:
           name: short-drama-mobile-apk
           path: build/apk/*.apk
           if-no-files-found: warn
+
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="build-${{ github.run_number }}"
+          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "${{ github.repository }}" \
+              --title "APK $TAG" --notes "Automated APK build $TAG"
+          shopt -s nullglob
+          for f in build/apk/*.apk; do
+            base="$(basename "$f")"
+            gh release upload "$TAG" "$f" --repo "${{ github.repository }}" --clobber
+            cp "$f" "/tmp/${base}.bin"
+            gh release upload "$TAG" "/tmp/${base}.bin" --repo "${{ github.repository }}" --clobber
+          done
