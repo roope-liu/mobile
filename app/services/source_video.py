@@ -88,6 +88,16 @@ def resolve_tracks(vid) -> list:
     return tracks or []
 
 
+def resolve_audio_tracks(vid) -> list:
+    model = _fetch_video_model(vid)
+    if not isinstance(model, dict):
+        return []
+    dv = model.get("dynamic_video")
+    if isinstance(dv, dict):
+        return dv.get("dynamic_audio_list") or []
+    return []
+
+
 def choose_track(tracks, quality="worst"):
     if not tracks:
         return None

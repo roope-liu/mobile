@@ -189,23 +189,15 @@ def player_view(state, handlers, page=None):
     if state.play_url:
         playlist.append(ft_video.types.VideoMedia(resource=state.play_url))
 
+    hint = ""
+    if not stream_base() and state.play_url and state.play_url.startswith("http"):
+        hint = "未配置播放代理，当前播放的是演示视频。可在首页“播放连接设置”填入隧道地址。"
+
     status = ft.Text(
-        state.error_message or state.loading_message or "",
+        state.error_message or state.loading_message or hint,
         size=12,
-        color=ft.Colors.RED if state.error_message else ft.Colors.GREY,
+        color=ft.Colors.RED if state.error_message else ft.Colors.ORANGE,
         selectable=True,
-    )
-    demo_hint = (
-        ft.Container(
-            content=ft.Text(
-                "未配置播放代理，当前播放的是演示视频。请在首页“播放连接设置”填入隧道地址后重试。",
-                size=11,
-                color=ft.Colors.ORANGE,
-            ),
-            padding=6,
-        )
-        if not stream_base()
-        else ft.Container(height=0)
     )
 
     def _set_status(text: str) -> None:
@@ -221,32 +213,61 @@ def player_view(state, handlers, page=None):
     def _on_load(e) -> None:
         _set_status("")
 
+    controls = ft_video.types.MaterialVideoControls(
+        display_seek_bar=True,
+        seek_gesture=True,
+        volume_gesture=True,
+        brightness_gesture=True,
+        seek_on_double_tap=True,
+        top_button_bar=[
+            ft.IconButton(
+                icon=ft.Icons.ARROW_BACK,
+                icon_color=ft.Colors.WHITE,
+                tooltip="返回",
+                on_click=handlers["on_back"],
+            )
+        ],
+        bottom_button_bar=[
+            ft_video.types.VideoPlayOrPauseButton(),
+            ft_video.types.VideoSpacer(),
+            ft_video.types.VideoPositionIndicator(),
+            ft_video.types.VideoVolumeButton(),
+            ft_video.types.VideoFullscreenButton(),
+        ],
+        button_bar_button_size=30,
+    )
+
     video = ft_video.Video(
         playlist=playlist,
         autoplay=True,
         fit=ft.BoxFit.CONTAIN,
         expand=True,
         wakelock=True,
+        muted=False,
+        volume=100,
+        controls=controls,
         on_error=_on_error,
         on_load=_on_load,
     )
 
-    body = ft.Column(
+    stack = ft.Stack(
         [
-            ft.Row(
-                [
-                    ft.IconButton(icon=ft.Icons.ARROW_BACK, on_click=handlers["on_back"]),
-                    ft.Text(state.play_title or "播放", size=16, weight=ft.FontWeight.BOLD),
-                ]
-            ),
-            demo_hint,
-            status,
             ft.Container(content=video, expand=True, bgcolor=ft.Colors.BLACK),
+            ft.Container(
+                content=ft.IconButton(
+                    icon=ft.Icons.ARROW_BACK,
+                    icon_color=ft.Colors.WHITE,
+                    bgcolor="#66000000",
+                    on_click=handlers["on_back"],
+                ),
+                left=8,
+                top=8,
+            ),
+            ft.Container(content=status, left=12, right=12, bottom=72),
         ],
         expand=True,
-        spacing=8,
     )
-    return ft.SafeArea(body, expand=True)
+    return ft.SafeArea(stack, expand=True)
 
 
 def loading_view(state, handlers, page=None):

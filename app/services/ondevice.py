@@ -11,7 +11,7 @@ import zipfile
 import requests
 
 from app.services.aes_ctr import ctr_xor
-from app.services.source_video import choose_track, resolve_tracks, unwrap_spade
+from app.services.source_video import choose_track, resolve_audio_tracks, resolve_tracks, unwrap_spade
 from app.storage import data_dir
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -460,8 +460,28 @@ def _download(url, dest):
     raise RuntimeError(f"视频下载失败（{label}）：{last_error}")
 
 
+def _mux_files(ffmpeg, video_path, audio_path, out_path):
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", video_path]
+    if audio_path:
+        cmd += ["-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"]
+    else:
+        cmd += ["-map", "0:v:0", "-an"]
+    cmd += ["-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart", "-f", "mp4", out_path]
+    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+    if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        detail = (result.stderr or "").strip()[:300] or f"rc={result.returncode}"
+        raise RuntimeError(f"ffmpeg 合并失败：{detail}")
+
+
+def _decrypt_to(enc_path, key_hex, dec_path):
+    if key_hex:
+        decrypt_mp4(enc_path, key_hex, dec_path)
+        return dec_path
+    return enc_path
+
+
 def local_video_path(vid, quality="worst") -> str:
-    """返回可直接给播放器使用的本地 MP4 路径；首次调用会下载并解密。"""
+    """返回可直接给播放器使用的本地 MP4 路径；首次调用会下载解密并合并音视频。"""
     vid = str(vid or "").strip()
     if not vid:
         raise ValueError("vid 为空")
@@ -472,7 +492,7 @@ def local_video_path(vid, quality="worst") -> str:
 
     cache = os.path.join(data_dir(), "videos")
     os.makedirs(cache, exist_ok=True)
-    out = os.path.join(cache, f"{vid}.mp4")
+    out = os.path.join(cache, f"{vid}.v2.mp4")
     if os.path.exists(out) and os.path.getsize(out) > 0:
         return out
 
@@ -482,21 +502,38 @@ def local_video_path(vid, quality="worst") -> str:
     codec = (track.get("video_meta") or {}).get("codec_type")
     key = unwrap_spade((track.get("encrypt_info") or {}).get("spade_a") or "")
 
-    enc = out + ".enc"
-    dec = out + ".dec"
+    audio_track = None
+    for candidate in resolve_audio_tracks(vid) or []:
+        if candidate.get("main_url"):
+            audio_track = candidate
+            break
+    audio_key = ""
+    if audio_track:
+        audio_key = (audio_track.get("encrypt_info") or {}).get("spade_a") or ""
+
+    enc = out + ".v.enc"
+    dec = out + ".v.dec"
+    aenc = out + ".a.enc"
+    adec = out + ".a.dec"
     tmp = out + ".tmp"
+    cleanup = (enc, dec, aenc, adec, tmp)
     try:
         _download(track["main_url"], enc)
-        try:
-            _decrypt_remux(enc, tmp, key, ffmpeg)
-        except RuntimeError:
-            if codec != "bytevc1":
-                raise RuntimeError("该清晰度使用 bytevc2 编码，手机端无法转换为 hvc1")
-            decrypt_mp4(enc, key, dec)
-            _remux(dec, tmp, ffmpeg)
+        video_input = _decrypt_to(enc, key, dec)
+
+        audio_input = None
+        if audio_track:
+            _download(audio_track["main_url"], aenc)
+            audio_input = _decrypt_to(aenc, unwrap_spade(audio_key) if audio_key else "", adec)
+
+        _mux_files(ffmpeg, video_input, audio_input, tmp)
         os.replace(tmp, out)
+    except RuntimeError:
+        if codec != "bytevc1":
+            raise RuntimeError("该清晰度使用 bytevc2 编码，手机端无法转换为 hvc1")
+        raise
     finally:
-        for p in (enc, dec, tmp):
+        for p in cleanup:
             try:
                 if os.path.exists(p):
                     os.remove(p)
