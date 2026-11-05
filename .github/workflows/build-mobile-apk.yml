@@ -54,10 +54,9 @@ jobs:
 
           build_ffmpeg() {
             arch="$1"
-            cpu="$2"
-            abi="$3"
-            triple="$4"
-            ./configure --target-os=android --arch="$arch" --cpu="$cpu" \
+            abi="$2"
+            triple="$3"
+            ./configure --target-os=android --arch="$arch" \
               --enable-cross-compile --sysroot="$TOOLCHAIN/sysroot" \
               --cc="$TOOLCHAIN/bin/${triple}21-clang" \
               --cxx="$TOOLCHAIN/bin/${triple}21-clang++" \
@@ -65,6 +64,7 @@ jobs:
               --nm="$TOOLCHAIN/bin/llvm-nm" --strip="$TOOLCHAIN/bin/llvm-strip" \
               --disable-everything --disable-network --disable-autodetect --disable-doc \
               --disable-ffprobe --disable-ffplay --enable-ffmpeg --enable-small \
+              --disable-x86asm \
               --enable-protocol=file --enable-demuxer=mov --enable-muxer=mp4 \
               --enable-parser=hevc --enable-decoder=hevc \
               --extra-cflags="-fPIE" --extra-ldflags="-static -pie"
@@ -76,8 +76,8 @@ jobs:
             make distclean
           }
 
-          build_ffmpeg aarch64 armv8-a arm64-v8a aarch64-linux-android
-          build_ffmpeg x86_64 x86-64 x86_64 x86_64-linux-android
+          build_ffmpeg aarch64 arm64-v8a aarch64-linux-android
+          build_ffmpeg x86_64 x86_64 x86_64-linux-android
           find "$GITHUB_WORKSPACE/flutter/ffmpeg_bin/android/src/main/jniLibs" -name libffmpeg.so -exec ls -lh {} \;
 
       - name: Install Python deps
