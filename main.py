@@ -123,16 +123,37 @@ def _main(page: ft.Page) -> None:
             state.loading_message = f"正在下载并解密第{episode}集（首次约 20MB）…"
             rerender()
 
+            def play_fallback(reason: str) -> None:
+                state.error_message = reason
+                state.play_url = resolve_play_url(vid) or ""
+                if stream_base():
+                    state.current_view = "loading"
+                    state.loading_message = "本地播放失败，正在请求流代理准备视频…"
+                    rerender()
+
+                    def prepare_fallback():
+                        ready = prepare_stream(vid)
+                        state.loading_message = ""
+                        if not ready:
+                            state.error_message = (state.error_message + " 流代理准备也失败了。").strip()
+                        state.current_view = "player"
+                        rerender()
+
+                    page.run_thread(prepare_fallback)
+                else:
+                    state.loading_message = ""
+                    state.current_view = "player"
+                    rerender()
+
             def play_local():
                 try:
                     path = local_video_path(vid)
                     state.play_url = Path(path).as_uri()
+                    state.loading_message = ""
                     state.current_view = "player"
+                    rerender()
                 except Exception as exc:  # noqa: BLE001
-                    state.error_message = f"本地播放失败：{exc}"
-                    state.current_view = "player"
-                state.loading_message = ""
-                rerender()
+                    play_fallback(f"本地播放失败：{str(exc)[:220]}")
 
             page.run_thread(play_local)
             return

@@ -1,9 +1,11 @@
 """手机端本地播放：下载 → 纯 Python AES-CTR 解密 → ffmpeg 重封装为 hvc1。"""
 import os
 import re
+import ssl
 import struct
 import subprocess
 import sys
+import time
 import zipfile
 
 import requests
@@ -353,13 +355,76 @@ def _pick_track(tracks):
     return max(tracks, key=height)
 
 
+class _TLSAdapter(requests.adapters.HTTPAdapter):
+    def __init__(self, ssl_context, **kwargs):
+        self._ssl_context = ssl_context
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = self._ssl_context
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        kwargs["ssl_context"] = self._ssl_context
+        return super().proxy_manager_for(*args, **kwargs)
+
+
+def _download_once(url, dest, ssl_context=None):
+    session = requests.Session()
+    if ssl_context is not None:
+        session.mount("https://", _TLSAdapter(ssl_context))
+    try:
+        with session.get(
+            url,
+            headers={
+                "User-Agent": "com.phoenix.read/71332 (Linux; Android 16)",
+                "Accept": "video/mp4,video/*,*/*;q=0.8",
+                "Connection": "close",
+            },
+            stream=True,
+            timeout=(20, 180),
+        ) as resp:
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        f.write(chunk)
+    finally:
+        session.close()
+    if not os.path.exists(dest) or os.path.getsize(dest) == 0:
+        raise RuntimeError("下载内容为空")
+
+
+def _tls12_context(verify=True):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = verify
+    ctx.verify_mode = ssl.CERT_REQUIRED if verify else ssl.CERT_NONE
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
 def _download(url, dest):
-    with requests.get(url, stream=True, timeout=(10, 120)) as resp:
-        resp.raise_for_status()
-        with open(dest, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=1024 * 256):
-                if chunk:
-                    f.write(chunk)
+    """下载带签名的 CDN 视频，兼容 Android 对部分 CDN TLS 连接的重置。"""
+    attempts = (
+        ("默认 TLS", None),
+        ("TLS1.2", _tls12_context()),
+        ("TLS1.2 不校验证书", _tls12_context(verify=False)),
+    )
+    last_error = None
+    for label, ctx in attempts:
+        try:
+            _download_once(url, dest, ctx)
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+            except OSError:
+                pass
+            time.sleep(1.0)
+    raise RuntimeError(f"视频下载失败（{label}）：{last_error}")
 
 
 def local_video_path(vid, quality="worst") -> str:
