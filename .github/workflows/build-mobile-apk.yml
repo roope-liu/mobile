@@ -80,6 +80,21 @@ jobs:
           build_ffmpeg x86_64 x86_64 x86_64-linux-android
           find "$GITHUB_WORKSPACE/flutter/ffmpeg_bin/android/src/main/jniLibs" -name libffmpeg.so -exec ls -lh {} \;
 
+      - name: Force extracted native libs (legacy packaging)
+        run: |
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/legacy-packaging.gradle" <<'EOF'
+          allprojects {
+              plugins.withId("com.android.application") {
+                  android.packagingOptions.jniLibs.useLegacyPackaging = true
+              }
+              plugins.withId("com.android.library") {
+                  android.packagingOptions.jniLibs.useLegacyPackaging = true
+              }
+          }
+          EOF
+          cat "$HOME/.gradle/init.d/legacy-packaging.gradle"
+
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip

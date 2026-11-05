@@ -4,6 +4,7 @@ import re
 import struct
 import subprocess
 import sys
+import zipfile
 
 import requests
 
@@ -217,6 +218,56 @@ def _native_lib_dirs():
     return list(dict.fromkeys(dirs))
 
 
+def _abi_candidates():
+    names = []
+    abi = _device_abi()
+    machine = (os.uname().machine or "").lower() if hasattr(os, "uname") else ""
+    if machine in ("aarch64", "armv8l", "armv7l"):
+        names += ["arm64-v8a", "armeabi-v7a"]
+    elif machine in ("x86_64", "amd64"):
+        names += ["x86_64"]
+    else:
+        names += ["x86_64", "arm64-v8a", "armeabi-v7a"]
+    if abi and abi not in names:
+        names.insert(0, abi)
+    return list(dict.fromkeys(names))
+
+
+def _extract_ffmpeg_from_apks():
+    """直接从 APK 内 lib/<abi>/libffmpeg.so 提取到应用数据目录。
+
+    Flet/serious_python 打包时不会解压 native libs（AGP 默认 useLegacyPackaging=false），
+    /data/app 下没有可执行文件。APK 本身可读，因此把目标 ABI 的二进制解出来再执行。
+    """
+    target = os.path.join(data_dir(), "bin", "ffmpeg")
+    if os.path.isfile(target) and os.path.getsize(target) > 0:
+        return target
+
+    for apk in _pm_apk_paths():
+        try:
+            with zipfile.ZipFile(apk) as zf:
+                names = set(zf.namelist())
+                for abi in _abi_candidates():
+                    member = f"lib/{abi}/libffmpeg.so"
+                    if member not in names:
+                        continue
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with zf.open(member) as src, open(target, "wb") as dst:
+                        while True:
+                            chunk = src.read(1024 * 256)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                    try:
+                        os.chmod(target, 0o755)
+                    except OSError:
+                        pass
+                    return target
+        except (OSError, zipfile.BadZipFile):
+            continue
+    return None
+
+
 def _android_native_lib_dir():
     for d in _native_lib_dirs():
         if os.path.isfile(os.path.join(d, "libffmpeg.so")):
@@ -255,6 +306,10 @@ def find_ffmpeg():
             os.path.join(native, "libffmpeg.so"),
             os.path.join(native, "ffmpeg"),
         ]
+    if _pm_apk_paths():
+        extracted = _extract_ffmpeg_from_apks()
+        if extracted:
+            candidates.insert(0, extracted)
     for path in candidates:
         if os.path.isfile(path):
             if not os.access(path, os.X_OK):
