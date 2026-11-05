@@ -291,6 +291,16 @@ def diagnose_engine() -> str:
     for d in dirs[:4]:
         exists = os.path.isfile(os.path.join(d, "libffmpeg.so"))
         parts.append(f"dir={d} libffmpeg存在={exists}")
+    if found:
+        try:
+            probe = subprocess.run(
+                [found, "-version"], capture_output=True, text=True,
+                timeout=8, creationflags=_NO_WINDOW,
+            )
+            first = ((probe.stdout or probe.stderr or "").splitlines() or [""])[0][:80]
+            parts.append(f"exec rc={probe.returncode} {first}")
+        except Exception as exc:  # noqa: BLE001
+            parts.append(f"exec失败：{str(exc)[:120]}")
     if data_so:
         parts.append("sample=" + " | ".join(data_so[:2]))
     return "\n".join(parts)
