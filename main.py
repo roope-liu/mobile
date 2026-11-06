@@ -35,6 +35,11 @@ def _main(page: ft.Page) -> None:
     from app.ui.views import build_app_view
 
     page.title = APP_TITLE
+    try:
+        page.theme_mode = ft.ThemeMode.LIGHT
+        page.bgcolor = "#EEF4FD"
+    except Exception:  # noqa: BLE001
+        pass
     if not is_mobile():
         try:
             page.window.width = 400

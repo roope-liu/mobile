@@ -36,6 +36,10 @@ def home_view(state, handlers, page=None):
         prefix_icon=ft.Icons.SEARCH,
         border=ft.NoInputBorder(),
         content_padding=ft.Padding.symmetric(horizontal=12, vertical=16),
+        text_style=ft.TextStyle(color="#203047", size=16, weight=ft.FontWeight.W_500),
+        hint_style=ft.TextStyle(color="#66758A", size=15),
+        cursor_color="#2F80ED",
+        selection_color="#B8D8FF",
         on_change=lambda e: setattr(state, "keyword", e.control.value),
         on_submit=lambda e: handlers["on_search"](),
         expand=True,
@@ -80,12 +84,13 @@ def home_view(state, handlers, page=None):
                         ),
                         ft.Column(
                             [
-                                ft.Text(title, size=14, weight=ft.FontWeight.BOLD, max_lines=2,
+                                ft.Text(title, size=14, color="#17263A", weight=ft.FontWeight.BOLD, max_lines=2,
                                         overflow=ft.TextOverflow.ELLIPSIS),
                                 ft.Text(
                                     f"{episode_count} 集" + (f" · {' / '.join(tags[:2])}" if tags else ""),
-                                    size=11,
-                                    color="#7E8CA0",
+                                    size=12,
+                                    color="#4C5D73",
+                                    weight=ft.FontWeight.W_500,
                                     max_lines=1,
                                     overflow=ft.TextOverflow.ELLIPSIS,
                                 ),
@@ -108,8 +113,8 @@ def home_view(state, handlers, page=None):
 
     def _chip(label: str, keyword: str):
         return ft.Container(
-            content=ft.Text(label, size=12, color=ft.Colors.WHITE),
-            bgcolor="#24FFFFFF",
+            content=ft.Text(label, size=13, color=ft.Colors.WHITE, weight=ft.FontWeight.W_500),
+            bgcolor="#2E5FA8",
             border=ft.Border.all(1, "#3DFFFFFF"),
             border_radius=999,
             padding=ft.Padding.symmetric(horizontal=14, vertical=8),
@@ -120,7 +125,8 @@ def home_view(state, handlers, page=None):
         content=ft.Column(
             [
                 ft.Container(
-                    content=ft.Text("SHORT DRAMA BOX", size=10, color=ft.Colors.WHITE),
+                    content=ft.Text("SHORT DRAMA BOX", size=11,
+                                    color="#EAF2FF", weight=ft.FontWeight.W_600),
                     bgcolor="#24FFFFFF",
                     border=ft.Border.all(1, "#3DFFFFFF"),
                     border_radius=999,
@@ -128,7 +134,7 @@ def home_view(state, handlers, page=None):
                 ),
                 ft.Text("搜索你想看的短剧", size=26, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                 ft.Text("海量短剧 · 在线播放 · 本机解密 · 多端同步",
-                        size=13, color="#C9DBF5"),
+                        size=14, color="#E4EFFF", weight=ft.FontWeight.W_500),
                 ft.Container(
                     content=ft.Row(
                         [search_field, search_btn],
@@ -176,8 +182,8 @@ def home_view(state, handlers, page=None):
                             alignment=ft.Alignment.CENTER,
                             content=ft.Icon(ft.Icons.MOVIE_OUTLINED, color="#A9B8CC", size=28),
                         ),
-                        ft.Text("待推送", size=12, weight=ft.FontWeight.W_600, max_lines=1),
-                        ft.Text(f"{label} · 占位", size=10, color="#8A99AD", max_lines=1),
+                        ft.Text("待推送", size=13, color="#26384F", weight=ft.FontWeight.W_600, max_lines=1),
+                        ft.Text(f"{label} · 占位", size=11, color="#52657D", max_lines=1),
                     ],
                     spacing=4,
                 ),
@@ -195,8 +201,8 @@ def home_view(state, handlers, page=None):
         rec_body.controls = _placeholder_cards(label)
         for key, chip in chips.items():
             selected = key == label
-            chip.bgcolor = "#2F80ED" if selected else "#F2F7FF"
-            chip.content.color = ft.Colors.WHITE if selected else "#5B6C82"
+            chip.bgcolor = "#2F80ED" if selected else "#E7EFFA"
+            chip.content.color = ft.Colors.WHITE if selected else "#2F3F55"
             chip.update()
         rec_body.update()
 
@@ -204,8 +210,8 @@ def home_view(state, handlers, page=None):
     tab_row = ft.Row([], spacing=8, wrap=True)
     for label in ("真人剧", "AI剧", "热门推荐"):
         chip = ft.Container(
-            content=ft.Text(label, size=12),
-            bgcolor="#2F80ED" if label == "真人剧" else "#F2F7FF",
+            content=ft.Text(label, size=13, weight=ft.FontWeight.W_500),
+            bgcolor="#2F80ED" if label == "真人剧" else "#E7EFFA",
             border_radius=999,
             padding=ft.Padding.symmetric(horizontal=14, vertical=7),
         )
@@ -217,7 +223,7 @@ def home_view(state, handlers, page=None):
     # 首次渲染时同步第一个 tab 的高亮
     for label, chip in rec_tabs.items():
         selected = label == "真人剧"
-        chip.content.color = ft.Colors.WHITE if selected else "#5B6C82"
+        chip.content.color = ft.Colors.WHITE if selected else "#2F3F55"
 
     recommend_card = ft.Container(
         content=ft.Column(
@@ -226,7 +232,7 @@ def home_view(state, handlers, page=None):
                     [
                         ft.Row(
                             [ft.Container(width=4, height=18, bgcolor="#2F80ED", border_radius=999),
-                             ft.Text("推荐内容", size=16, weight=ft.FontWeight.BOLD)],
+                             ft.Text("推荐内容", size=17, color="#1A2B42", weight=ft.FontWeight.BOLD)],
                             spacing=8,
                         ),
                         ft.Container(expand=True),
@@ -255,8 +261,8 @@ def home_view(state, handlers, page=None):
         else ft.Container(
             content=ft.Column(
                 [
-                    ft.Icon(ft.Icons.SEARCH, size=32, color="#A9B8CC"),
-                    ft.Text("输入关键词开始搜索真实源站短剧", size=13, color="#7E8CA0"),
+                    ft.Icon(ft.Icons.SEARCH, size=32, color="#8C9FB8"),
+                    ft.Text("输入关键词开始搜索真实源站短剧", size=14, color="#4C5D73"),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 spacing=8,
@@ -293,7 +299,8 @@ def home_view(state, handlers, page=None):
             ft.Container(width=4, height=18, bgcolor="#FF8A3D", border_radius=999),
             ft.Text(
                 f"搜索结果 · {len(cards)} 条" if cards else "搜索结果",
-                size=16,
+                size=17,
+                color="#1A2B42",
                 weight=ft.FontWeight.BOLD,
             ),
         ],
@@ -305,7 +312,7 @@ def home_view(state, handlers, page=None):
             navbar,
             hero,
             ft.Container(
-                content=ft.Text(state.error_message, size=12, color="#B45309"),
+                content=ft.Text(state.error_message, size=13, color="#8A3B00"),
                 bgcolor="#FFF4E5",
                 border_radius=12,
                 padding=10,
@@ -315,7 +322,7 @@ def home_view(state, handlers, page=None):
             recommend_card,
             results_header,
             results_section,
-            ft.Text("仅供个人学习交流使用", size=11, color="#93A2B7",
+            ft.Text("仅供个人学习交流使用", size=12, color="#68788F",
                     text_align=ft.TextAlign.CENTER),
         ],
         spacing=14,

@@ -28,7 +28,7 @@ def settings_view(state, handlers, page=None):
         diag.color = ft.Colors.GREEN if find_ffmpeg() else ft.Colors.ORANGE
         diag.update()
 
-    diag = ft.Text("", size=11, selectable=True, color="#7E8CA0")
+    diag = ft.Text("", size=11, selectable=True, color="#4C5D73")
     prefetch = ft.Dropdown(
         label="播放时预缓存后续集数",
         value=str(settings.prefetch_count()),
@@ -54,7 +54,7 @@ def settings_view(state, handlers, page=None):
                             ft.Text(name, size=13, weight=ft.FontWeight.W_600, max_lines=1,
                                     overflow=ft.TextOverflow.ELLIPSIS),
                             ft.Text(f"{item['count']} 集 · {cache_service.human_size(item['bytes'])}",
-                                    size=11, color="#8795A8"),
+                                    size=11, color="#52657D"),
                         ],
                         expand=True,
                         spacing=2,
@@ -68,7 +68,7 @@ def settings_view(state, handlers, page=None):
             )
         )
     if not drama_rows:
-        drama_rows.append(ft.Text("暂无本地播放缓存", size=12, color="#8795A8"))
+        drama_rows.append(ft.Text("暂无本地播放缓存", size=12, color="#52657D"))
 
     history_items = history_service.list_entries()
     history_rows = []
@@ -95,7 +95,7 @@ def settings_view(state, handlers, page=None):
             )
         )
     if not history_rows:
-        history_rows.append(ft.Text("暂无播放历史", size=12, color="#8795A8"))
+        history_rows.append(ft.Text("暂无播放历史", size=12, color="#52657D"))
 
     clear_history_toggle = ft.Checkbox(
         label="同时清除本地缓存及临时文件",
@@ -124,7 +124,7 @@ def settings_view(state, handlers, page=None):
                         ft.Row([ft.Icon(ft.Icons.LINK, color="#2F80ED"),
                                 ft.Text("播放连接设置", size=16, weight=ft.FontWeight.BOLD)], spacing=8),
                         ft.Text("优先使用手机本地解码；本地引擎不可用时可配置代理。",
-                                size=12, color="#7E8CA0"),
+                                size=12, color="#4C5D73"),
                         ft.Row([stream_field, ft.TextButton(content=save_label, on_click=save_stream)]),
                         ft.TextButton("检测本地解码引擎", icon=ft.Icons.MEMORY,
                                       on_click=check_engine),
@@ -132,7 +132,7 @@ def settings_view(state, handlers, page=None):
                         ft.Divider(height=1),
                         prefetch,
                         ft.Text("预缓存会在当前集完成后，在后台并发下载后续集数；网络和存储空间充足时使用。",
-                                size=11, color="#8795A8"),
+                                size=11, color="#52657D"),
                     ],
                     spacing=10,
                 ),
@@ -178,7 +178,7 @@ def settings_view(state, handlers, page=None):
                 border_radius=16,
                 padding=16,
             ),
-            ft.Text("仅供个人学习交流使用", size=11, color="#93A2B7",
+            ft.Text("仅供个人学习交流使用", size=11, color="#68788F",
                     text_align=ft.TextAlign.CENTER),
         ],
         spacing=14,
@@ -195,3 +195,4 @@ def settings_view(state, handlers, page=None):
         expand=True,
         padding=ft.Padding.only(left=16, right=16, top=12, bottom=10),
     )
+
