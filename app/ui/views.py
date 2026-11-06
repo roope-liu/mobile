@@ -215,6 +215,18 @@ def player_view(state, handlers, page=None):
     def _on_load(e) -> None:
         _set_status("")
 
+    volume_icon = ft.Icon(ft.Icons.VOLUME_UP, color=ft.Colors.WHITE, size=22)
+    volume_state = {"value": 100.0}
+    volume_slider = ft.Slider(
+        min=0,
+        max=100,
+        value=100,
+        width=96,
+        active_color=ft.Colors.WHITE,
+        inactive_color="#66FFFFFF",
+    )
+    volume_button = ft.IconButton(icon=volume_icon, tooltip="静音/恢复")
+
     controls = ft_video.types.MaterialVideoControls(
         display_seek_bar=True,
         seek_gesture=True,
@@ -233,7 +245,14 @@ def player_view(state, handlers, page=None):
             ft_video.types.VideoPlayOrPauseButton(),
             ft_video.types.VideoSpacer(),
             ft_video.types.VideoPositionIndicator(),
-            ft_video.types.VideoVolumeButton(),
+            ft.Container(
+                content=ft.Row(
+                    [volume_button, volume_slider],
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                height=40,
+            ),
             ft_video.types.VideoFullscreenButton(),
         ],
         button_bar_button_size=30,
@@ -251,9 +270,6 @@ def player_view(state, handlers, page=None):
         on_error=_on_error,
         on_load=_on_load,
     )
-
-    volume_icon = ft.Icon(ft.Icons.VOLUME_UP, color=ft.Colors.WHITE, size=22)
-    volume_state = {"value": 100.0}
 
     def _apply_volume(value: float) -> None:
         volume_state["value"] = float(value)
@@ -281,15 +297,8 @@ def player_view(state, handlers, page=None):
         except Exception:  # noqa: BLE001
             pass
 
-    volume_slider = ft.Slider(
-        min=0,
-        max=100,
-        value=100,
-        width=112,
-        active_color=ft.Colors.WHITE,
-        inactive_color="#66FFFFFF",
-        on_change=_on_volume_slider,
-    )
+    volume_slider.on_change = _on_volume_slider
+    volume_button.on_click = _toggle_mute
 
     stack = ft.Stack(
         [
@@ -303,25 +312,6 @@ def player_view(state, handlers, page=None):
                 ),
                 left=8,
                 top=8,
-            ),
-            ft.Container(
-                content=ft.Row(
-                    [
-                        ft.IconButton(
-                            icon=volume_icon,
-                            on_click=_toggle_mute,
-                            tooltip="静音/恢复",
-                        ),
-                        volume_slider,
-                    ],
-                    spacing=0,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                right=8,
-                top=8,
-                bgcolor="#66000000",
-                border_radius=24,
-                padding=ft.Padding.only(left=4, right=8),
             ),
             ft.Container(content=status, left=12, right=12, bottom=72),
         ],
