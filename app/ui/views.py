@@ -194,9 +194,11 @@ def player_view(state, handlers, page=None):
         hint = "未配置播放代理，当前播放的是演示视频。可在首页“播放连接设置”填入隧道地址。"
 
     status = ft.Text(
-        state.error_message or state.loading_message or hint,
+        state.error_message or state.loading_message or state.play_info or hint,
         size=12,
-        color=ft.Colors.RED if state.error_message else ft.Colors.ORANGE,
+        color=ft.Colors.RED
+        if state.error_message
+        else (ft.Colors.ORANGE if (state.loading_message or hint) else ft.Colors.GREY),
         selectable=True,
     )
 
@@ -250,6 +252,45 @@ def player_view(state, handlers, page=None):
         on_load=_on_load,
     )
 
+    volume_icon = ft.Icon(ft.Icons.VOLUME_UP, color=ft.Colors.WHITE, size=22)
+    volume_state = {"value": 100.0}
+
+    def _apply_volume(value: float) -> None:
+        volume_state["value"] = float(value)
+        video.volume = float(value)
+        video.muted = float(value) <= 0
+        volume_icon.name = (
+            ft.Icons.VOLUME_OFF
+            if float(value) <= 0
+            else (ft.Icons.VOLUME_DOWN if float(value) < 50 else ft.Icons.VOLUME_UP)
+        )
+        try:
+            video.update()
+            volume_icon.update()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_volume_slider(e) -> None:
+        _apply_volume(float(e.control.value))
+
+    def _toggle_mute(e) -> None:
+        _apply_volume(0 if volume_state["value"] > 0 else 100)
+        volume_slider.value = volume_state["value"]
+        try:
+            volume_slider.update()
+        except Exception:  # noqa: BLE001
+            pass
+
+    volume_slider = ft.Slider(
+        min=0,
+        max=100,
+        value=100,
+        width=112,
+        active_color=ft.Colors.WHITE,
+        inactive_color="#66FFFFFF",
+        on_change=_on_volume_slider,
+    )
+
     stack = ft.Stack(
         [
             ft.Container(content=video, expand=True, bgcolor=ft.Colors.BLACK),
@@ -262,6 +303,25 @@ def player_view(state, handlers, page=None):
                 ),
                 left=8,
                 top=8,
+            ),
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.IconButton(
+                            icon=volume_icon,
+                            on_click=_toggle_mute,
+                            tooltip="静音/恢复",
+                        ),
+                        volume_slider,
+                    ],
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                right=8,
+                top=8,
+                bgcolor="#66000000",
+                border_radius=24,
+                padding=ft.Padding.only(left=4, right=8),
             ),
             ft.Container(content=status, left=12, right=12, bottom=72),
         ],

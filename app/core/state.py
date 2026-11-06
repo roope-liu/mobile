@@ -12,3 +12,4 @@ class AppState:
     error_message: str = ""
     stream_base: str = ""
     loading_message: str = ""
+    play_info: str = ""

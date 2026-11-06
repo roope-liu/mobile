@@ -110,13 +110,14 @@ def _main(page: ft.Page) -> None:
     def on_play(episode: int, vid: str) -> None:
         from pathlib import Path
 
-        from app.services.ondevice import find_ffmpeg, local_video_path
+        from app.services.ondevice import describe_streams, find_ffmpeg, local_video_path
         from app.services.playback_service import prepare_stream, resolve_play_url, stream_base
 
         state.play_title = f"第{episode}集"
         state.play_url = ""
         state.error_message = ""
         state.loading_message = ""
+        state.play_info = ""
 
         if find_ffmpeg():
             state.current_view = "loading"
@@ -149,6 +150,7 @@ def _main(page: ft.Page) -> None:
                 try:
                     path = local_video_path(vid)
                     state.play_url = Path(path).as_uri()
+                    state.play_info = describe_streams(path, find_ffmpeg() or "")
                     state.loading_message = ""
                     state.current_view = "player"
                     rerender()

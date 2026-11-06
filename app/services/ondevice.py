@@ -465,12 +465,27 @@ def _mux_files(ffmpeg, video_path, audio_path, out_path):
     if audio_path:
         cmd += ["-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"]
     else:
-        cmd += ["-map", "0:v:0", "-an"]
+        cmd += ["-map", "0:v:0", "-map", "0:a?"]
     cmd += ["-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart", "-f", "mp4", out_path]
     result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
     if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         detail = (result.stderr or "").strip()[:300] or f"rc={result.returncode}"
         raise RuntimeError(f"ffmpeg 合并失败：{detail}")
+
+
+def describe_streams(path, ffmpeg) -> str:
+    """用 ffmpeg -i 读取流信息，确认成片是否带音轨。"""
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", path],
+            capture_output=True, text=True, timeout=20, creationflags=_NO_WINDOW,
+        )
+        text = result.stderr or ""
+        has_video = "Video:" in text
+        has_audio = "Audio:" in text
+        return f"成片流：视频={'有' if has_video else '无'}，音频={'有' if has_audio else '无'}"
+    except Exception as exc:  # noqa: BLE001
+        return f"流信息读取失败：{str(exc)[:80]}"
 
 
 def _decrypt_to(enc_path, key_hex, dec_path):
