@@ -58,10 +58,10 @@ def _main(page: ft.Page) -> None:
         try:
             from app.services.search_service import search_dramas
             state.search_results = search_dramas(state.keyword)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             from app.services.mock_service import search as mock_search
             state.search_results = mock_search(state.keyword)
-            state.error_message = "源站搜索失败，已显示测试数据"
+            state.error_message = f"源站搜索失败：{str(exc)[:180]}（已显示测试数据）"
         state.current_view = "home"
         rerender()
 

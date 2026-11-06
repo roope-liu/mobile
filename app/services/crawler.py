@@ -6,6 +6,7 @@
 import json
 import os
 import re
+import ssl
 import sys
 import threading
 import time
@@ -40,6 +41,49 @@ _session.mount(
     "https://",
     requests.adapters.HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=1),
 )
+
+
+class _TLS12Adapter(requests.adapters.HTTPAdapter):
+    def __init__(self, ssl_context, **kwargs):
+        self._ssl_context = ssl_context
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = self._ssl_context
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        kwargs["ssl_context"] = self._ssl_context
+        return super().proxy_manager_for(*args, **kwargs)
+
+
+_tls12_session = None
+
+
+def _get_tls12_session():
+    global _tls12_session
+    if _tls12_session is None:
+        ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        sess = requests.Session()
+        sess.mount("https://", _TLS12Adapter(ctx, max_retries=1))
+        _tls12_session = sess
+    return _tls12_session
+
+
+def _http_get(url, headers, timeout=(8, 20)):
+    """带重试与 TLS1.2 回退的 GET，兼容部分 Android 设备对 TLS 的重置。"""
+    last_error = None
+    for session in (_session, _get_tls12_session(), _session):
+        try:
+            resp = session.get(url, headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            time.sleep(0.6)
+    raise last_error
 
 
 def _cache_get(key):
@@ -160,7 +204,7 @@ class HongguoCrawler:
         signed_headers, signed_url = core_sixgod(
             SEARCH_URL, params, SEARCH_DEVICES, data={}, header=headers
         )
-        resp = _session.get(signed_url, headers=signed_headers, timeout=(8, 20))
+        resp = _http_get(signed_url, headers=signed_headers, timeout=(8, 20))
         resp.raise_for_status()
         payload = resp.json()
         if payload.get("code") != 0:
@@ -361,7 +405,7 @@ class HongguoCrawler:
             return None
 
         url = f"{SITE}/detail?series_id={drama_id}"
-        resp = _session.get(url, headers={"User-Agent": WEB_UA}, timeout=(8, 20))
+        resp = _http_get(url, headers={"User-Agent": WEB_UA}, timeout=(8, 20))
         resp.raise_for_status()
 
         match = re.search(r"window\._ROUTER_DATA\s*=\s*|_ROUTER_DATA\s*=\s*", resp.text)
