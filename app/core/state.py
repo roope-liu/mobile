@@ -13,3 +13,9 @@ class AppState:
     stream_base: str = ""
     loading_message: str = ""
     play_info: str = ""
+    play_series_id: str = ""
+    play_episode: int = 0
+    play_vid: str = ""
+    resume_ms: int = 0
+    last_position_ms: int = 0
+    last_duration_ms: int = 0

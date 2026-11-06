@@ -4,7 +4,7 @@ import os
 
 from app.storage import data_dir
 
-_DEFAULT = {"stream_base": ""}
+_DEFAULT = {"stream_base": "", "prefetch_count": "2"}
 
 
 def _path() -> str:
@@ -40,3 +40,18 @@ def stream_base() -> str:
 
 def set_stream_base(url: str) -> None:
     save(stream_base=str(url or "").strip().rstrip("/"))
+
+
+def prefetch_count() -> int:
+    try:
+        return max(0, min(5, int(load().get("prefetch_count") or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_prefetch_count(count: int) -> None:
+    try:
+        value = max(0, min(5, int(count)))
+    except (TypeError, ValueError):
+        value = 0
+    save(prefetch_count=str(value))

@@ -10,6 +10,7 @@ import zipfile
 
 import requests
 
+from app.services import cache_service
 from app.services.aes_ctr import ctr_xor
 from app.services.source_video import choose_track, resolve_audio_tracks, resolve_tracks, unwrap_spade
 from app.storage import data_dir
@@ -495,7 +496,7 @@ def _decrypt_to(enc_path, key_hex, dec_path):
     return enc_path
 
 
-def local_video_path(vid, quality="worst") -> str:
+def local_video_path(vid, quality="worst", series_name="", episode=0) -> str:
     """返回可直接给播放器使用的本地 MP4 路径；首次调用会下载解密并合并音视频。"""
     vid = str(vid or "").strip()
     if not vid:
@@ -505,10 +506,10 @@ def local_video_path(vid, quality="worst") -> str:
     if not ffmpeg:
         raise RuntimeError("未找到 ffmpeg（手机端需打包 ffmpeg）")
 
-    cache = os.path.join(data_dir(), "videos")
-    os.makedirs(cache, exist_ok=True)
-    out = os.path.join(cache, f"{vid}.v2.mp4")
+    cache = cache_service.videos_dir()
+    out = cache_service.final_path(vid)
     if os.path.exists(out) and os.path.getsize(out) > 0:
+        cache_service.record(vid, series_name, episode)
         return out
 
     track = _pick_track(resolve_tracks(vid))
@@ -543,6 +544,7 @@ def local_video_path(vid, quality="worst") -> str:
 
         _mux_files(ffmpeg, video_input, audio_input, tmp)
         os.replace(tmp, out)
+        cache_service.record(vid, series_name, episode)
     except RuntimeError:
         if codec != "bytevc1":
             raise RuntimeError("该清晰度使用 bytevc2 编码，手机端无法转换为 hvc1")

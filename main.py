@@ -110,6 +110,7 @@ def _main(page: ft.Page) -> None:
     def on_play(episode: int, vid: str) -> None:
         from pathlib import Path
 
+        from app.services import history_service, prefetch_service
         from app.services.ondevice import describe_streams, find_ffmpeg, local_video_path
         from app.services.playback_service import prepare_stream, resolve_play_url, stream_base
 
@@ -118,6 +119,30 @@ def _main(page: ft.Page) -> None:
         state.error_message = ""
         state.loading_message = ""
         state.play_info = ""
+        state.play_episode = int(episode)
+        state.play_vid = str(vid or "")
+        state.play_series_id = ""
+
+        drama = state.current_drama or {}
+        series_id = str(drama.get("series_id") or "")
+        series_name = str(drama.get("series_name") or "")
+        cover = str(drama.get("series_cover") or drama.get("cover") or "")
+        vid_list = [str(v) for v in (drama.get("vid_list") or [])]
+        state.play_series_id = series_id
+
+        previous = history_service.get(series_id) if series_id else None
+        state.resume_ms = int(previous.get("position_ms") or 0) if previous and str(previous.get("vid") or "") == str(vid) else 0
+        state.last_position_ms = state.resume_ms
+        state.last_duration_ms = int((previous or {}).get("duration_ms") or 0)
+        history_service.upsert(
+            series_id, series_name, cover, episode, vid, vid_list,
+            position_ms=state.resume_ms,
+        )
+
+        def prefetch_next() -> None:
+            count = settings.prefetch_count()
+            if count > 0 and vid_list:
+                prefetch_service.prefetch_upcoming(vid_list, episode, count, series_name)
 
         if find_ffmpeg():
             state.current_view = "loading"
@@ -148,12 +173,15 @@ def _main(page: ft.Page) -> None:
 
             def play_local():
                 try:
-                    path = local_video_path(vid)
+                    path = local_video_path(
+                        vid, series_name=series_name, episode=episode
+                    )
                     state.play_url = Path(path).as_uri()
                     state.play_info = describe_streams(path, find_ffmpeg() or "")
                     state.loading_message = ""
                     state.current_view = "player"
                     rerender()
+                    prefetch_next()
                 except Exception as exc:  # noqa: BLE001
                     play_fallback(f"本地播放失败：{str(exc)[:220]}")
 
@@ -185,6 +213,56 @@ def _main(page: ft.Page) -> None:
         state.current_view = "player"
         rerender()
 
+    def on_open_settings(e=None) -> None:
+        state.current_view = "settings"
+        rerender()
+
+    def on_resume(entry: dict) -> None:
+        from app.services import history_service
+
+        item = dict(entry or {})
+        vid = str(item.get("vid") or "").strip()
+        episode = int(item.get("episode") or 1)
+        vid_list = [str(v) for v in (item.get("vid_list") or [])]
+        if not vid and 0 < episode <= len(vid_list):
+            vid = vid_list[episode - 1]
+        if not vid:
+            return
+        state.current_drama = {
+            "series_id": str(item.get("series_id") or ""),
+            "series_name": str(item.get("series_name") or ""),
+            "series_cover": str(item.get("cover") or ""),
+            "series_intro": "",
+            "tags": [],
+            "vid_list": vid_list,
+            "episode_cnt": len(vid_list),
+        }
+        on_play(episode, vid)
+
+    def on_clear_cache_all(e=None) -> None:
+        from app.services import cache_service
+
+        cache_service.clear_all()
+        rerender()
+
+    def on_clear_cache_drama(name: str, e=None) -> None:
+        from app.services import cache_service
+
+        cache_service.clear_drama(name)
+        rerender()
+
+    def on_clear_history(also_cache: bool = False, e=None) -> None:
+        from app.services import cache_service, history_service
+
+        history_service.clear()
+        if also_cache:
+            cache_service.clear_all()
+        rerender()
+
+    def on_set_prefetch(count: int, e=None) -> None:
+        settings.set_prefetch_count(count)
+        rerender()
+
     handlers.update(
         {
             "rerender": rerender,
@@ -192,6 +270,12 @@ def _main(page: ft.Page) -> None:
             "on_open_detail": on_open_detail,
             "on_back": on_back,
             "on_play": on_play,
+            "on_open_settings": on_open_settings,
+            "on_resume": on_resume,
+            "on_clear_cache_all": on_clear_cache_all,
+            "on_clear_cache_drama": on_clear_cache_drama,
+            "on_clear_history": on_clear_history,
+            "on_set_prefetch": on_set_prefetch,
         }
     )
 

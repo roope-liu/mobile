@@ -1,7 +1,9 @@
+import time
+
 import flet as ft
 import flet_video as ft_video
 
-from app import settings
+from app.ui.settings_view import settings_view
 
 
 def _cover_url(item: dict) -> str:
@@ -43,6 +45,12 @@ def home_view(state, handlers, page=None):
         icon=ft.Icons.SEARCH,
         on_click=lambda e: handlers["on_search"](),
         style=ft.ButtonStyle(bgcolor="#2F80ED", color=ft.Colors.WHITE),
+    )
+    settings_btn = ft.OutlinedButton(
+        "设置",
+        icon=ft.Icons.SETTINGS,
+        on_click=handlers.get("on_open_settings"),
+        style=ft.ButtonStyle(color=ft.Colors.WHITE, side=ft.BorderSide(1, "#75B7FF")),
     )
 
     cards = []
@@ -97,64 +105,6 @@ def home_view(state, handlers, page=None):
                 col={"xs": 6, "sm": 4, "md": 3, "lg": 3},
             )
         )
-
-    stream_field = ft.TextField(
-        value=state.stream_base,
-        hint_text="流代理隧道地址（可选）",
-        label="播放代理地址",
-        keyboard_type=ft.KeyboardType.URL,
-        expand=True,
-    )
-
-    def save_stream_base(e):
-        state.stream_base = (stream_field.value or "").strip().rstrip("/")
-        settings.set_stream_base(state.stream_base)
-        try:
-            e.control.content = "已保存"
-            e.control.update()
-        except Exception:  # noqa: BLE001
-            pass
-
-    engine_status = ft.Text("", size=12, color=ft.Colors.GREY, selectable=True)
-
-    def check_engine(e):
-        from app.services.ondevice import diagnose_engine, find_ffmpeg
-
-        engine_status.value = diagnose_engine()
-        engine_status.color = ft.Colors.GREEN if find_ffmpeg() else ft.Colors.ORANGE
-        try:
-            engine_status.update()
-        except Exception:  # noqa: BLE001
-            pass
-
-    settings_panel = ft.Container(
-        content=ft.ExpansionTile(
-            title=ft.Row(
-                [ft.Icon(ft.Icons.TUNE, size=18, color="#2F80ED"),
-                 ft.Text("播放连接设置", size=14, weight=ft.FontWeight.W_600)],
-                spacing=6,
-            ),
-            expanded=not bool(state.stream_base),
-            controls_padding=ft.Padding.only(left=12, right=12, bottom=12),
-            controls=[
-                ft.Text("优先使用手机本地解码；未检测到本地引擎时才使用下面的代理地址。",
-                        size=12, color="#7E8CA0"),
-                ft.Row([
-                    stream_field,
-                    ft.TextButton("保存", on_click=save_stream_base),
-                ]),
-                ft.Row([
-                    ft.TextButton("检测本地解码引擎", on_click=check_engine),
-                ]),
-                engine_status,
-            ],
-        ),
-        bgcolor="#FFFFFF",
-        border_radius=16,
-        border=ft.Border.all(1, "#E8EDF5"),
-        shadow=ft.BoxShadow(blur_radius=10, color="#0F1B3D66", offset=ft.Offset(0, 3)),
-        clip_behavior=ft.ClipBehavior.HARD_EDGE,
-    )
 
     def _chip(label: str, keyword: str):
         return ft.Container(
@@ -324,7 +274,7 @@ def home_view(state, handlers, page=None):
             [
                 ft.Text("🎬 短剧盒子", size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                 ft.Container(expand=True),
-                ft.Text("移动版", size=12, color="#D6E6FF"),
+                settings_btn,
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
@@ -362,7 +312,6 @@ def home_view(state, handlers, page=None):
             )
             if state.error_message
             else ft.Container(height=0),
-            settings_panel,
             recommend_card,
             results_header,
             results_section,
@@ -444,6 +393,7 @@ def detail_view(state, handlers, page=None):
 
 
 def player_view(state, handlers, page=None):
+    from app.services import history_service
     from app.services.playback_service import stream_base
 
     playlist = []
@@ -452,7 +402,7 @@ def player_view(state, handlers, page=None):
 
     hint = ""
     if not stream_base() and state.play_url and state.play_url.startswith("http"):
-        hint = "未配置播放代理，当前播放的是演示视频。可在首页“播放连接设置”填入隧道地址。"
+        hint = "未配置播放代理，当前播放的是演示视频。可在设置中填入代理地址。"
 
     status = ft.Text(
         state.error_message or state.loading_message or state.play_info or hint,
@@ -462,6 +412,43 @@ def player_view(state, handlers, page=None):
         else (ft.Colors.ORANGE if (state.loading_message or hint) else ft.Colors.GREY),
         selectable=True,
     )
+
+    last_save = {"ts": 0.0}
+
+    def _save_position(force: bool = False) -> None:
+        ms = int(state.last_position_ms or 0)
+        if not state.play_series_id or ms <= 0:
+            return
+        now = time.time()
+        if not force and now - last_save["ts"] < 4:
+            return
+        last_save["ts"] = now
+        try:
+            history_service.save_position(
+                state.play_series_id, state.play_vid, ms, int(state.last_duration_ms or 0)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _go_back(e=None) -> None:
+        _save_position(force=True)
+        handlers["on_back"]()
+
+    def _position_ms(data) -> int:
+        value = getattr(data, "in_milliseconds", None)
+        if value is not None:
+            return int(value)
+        try:
+            return int(data or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _on_position(e) -> None:
+        state.last_position_ms = _position_ms(e.data)
+        _save_position()
+
+    def _on_duration(e) -> None:
+        state.last_duration_ms = _position_ms(e.data)
 
     def _set_status(text: str) -> None:
         try:
@@ -475,6 +462,13 @@ def player_view(state, handlers, page=None):
 
     def _on_load(e) -> None:
         _set_status("")
+        resume = int(state.resume_ms or 0)
+        state.resume_ms = 0
+        if resume > 1500 and page is not None:
+            try:
+                page.run_task(video.seek, ft.Duration(milliseconds=resume))
+            except Exception:  # noqa: BLE001
+                pass
 
     volume_icon = ft.Icon(ft.Icons.VOLUME_UP, color=ft.Colors.WHITE, size=22)
     volume_state = {"value": 100.0}
@@ -499,7 +493,7 @@ def player_view(state, handlers, page=None):
                 icon=ft.Icons.ARROW_BACK,
                 icon_color=ft.Colors.WHITE,
                 tooltip="返回",
-                on_click=handlers["on_back"],
+                on_click=_go_back,
             )
         ],
         bottom_button_bar=[
@@ -530,6 +524,8 @@ def player_view(state, handlers, page=None):
         controls=controls,
         on_error=_on_error,
         on_load=_on_load,
+        on_position_change=_on_position,
+        on_duration_change=_on_duration,
     )
 
     def _apply_volume(value: float) -> None:
@@ -569,7 +565,7 @@ def player_view(state, handlers, page=None):
                     icon=ft.Icons.ARROW_BACK,
                     icon_color=ft.Colors.WHITE,
                     bgcolor="#66000000",
-                    on_click=handlers["on_back"],
+                    on_click=_go_back,
                 ),
                 left=8,
                 top=8,
@@ -617,6 +613,8 @@ def build_app_view(state, handlers, page=None):
         return loading_view(state, handlers, page)
     if state.current_view == "detail":
         return detail_view(state, handlers, page)
+    if state.current_view == "settings":
+        return settings_view(state, handlers, page)
     if state.current_view == "player":
         return player_view(state, handlers, page)
     return home_view(state, handlers, page)
