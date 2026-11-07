@@ -215,6 +215,16 @@ def _main(page: ft.Page) -> None:
             return
 
         state.error_message = ""
+        try:
+            from app.platform import is_mobile
+
+            if is_mobile():
+                state.error_message = (
+                    "未找到可执行的本地解码引擎：Android 10+ 禁止直接执行应用数据目录中的程序。"
+                    "请安装启用 native 库解压的新版本，或在设置中配置播放代理。"
+                )
+        except Exception:  # noqa: BLE001
+            pass
         state.current_view = "player"
         rerender()
 

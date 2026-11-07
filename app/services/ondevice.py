@@ -311,6 +311,10 @@ def diagnose_engine() -> str:
     for d in dirs[:4]:
         exists = os.path.isfile(os.path.join(d, "libffmpeg.so"))
         parts.append(f"dir={d} libffmpeg存在={exists}")
+    native_dir = _android_native_lib_dir()
+    if native_dir:
+        native_bin = os.path.join(native_dir, "libffmpeg.so")
+        parts.append(f"nativeExec={_probe_ffmpeg(native_bin)}")
     if found:
         try:
             probe = subprocess.run(
@@ -326,30 +330,53 @@ def diagnose_engine() -> str:
     return "\n".join(parts)
 
 
+def _probe_ffmpeg(path) -> bool:
+    """真正执行一次，确认该路径在当前系统上可执行（Android 10+ 禁止执行应用数据目录）。"""
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        if not os.access(path, os.X_OK):
+            os.chmod(path, 0o755)
+    except OSError:
+        return False
+    try:
+        result = subprocess.run(
+            [path, "-version"], capture_output=True, text=True,
+            timeout=10, creationflags=_NO_WINDOW,
+        )
+        output = ((result.stdout or "") + (result.stderr or "")).lower()
+        return result.returncode == 0 or "ffmpeg version" in output
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_FFMPEG_READY = {"path": ""}
+
+
 def find_ffmpeg():
     env = (os.getenv("FFMPEG_PATH") or "").strip()
-    if env and os.path.isfile(env):
+    if env and _probe_ffmpeg(env):
         return env
 
+    cached = _FFMPEG_READY.get("path") or ""
+    if cached and _probe_ffmpeg(cached):
+        return cached
+
     candidates = []
-    if _pm_apk_paths():
-        extracted = _extract_ffmpeg_from_apks()
-        if extracted:
-            candidates.append(extracted)
     native = _android_native_lib_dir()
     if native:
         candidates += [
             os.path.join(native, "libffmpeg.so"),
             os.path.join(native, "ffmpeg"),
         ]
+    if _pm_apk_paths():
+        extracted = _extract_ffmpeg_from_apks()
+        if extracted:
+            candidates.append(extracted)
     candidates += [os.path.join(data_dir(), "ffmpeg"), os.path.join(data_dir(), "bin", "ffmpeg")]
     for path in candidates:
-        if os.path.isfile(path):
-            if not os.access(path, os.X_OK):
-                try:
-                    os.chmod(path, 0o755)
-                except OSError:
-                    continue
+        if _probe_ffmpeg(path):
+            _FFMPEG_READY["path"] = path
             return path
     return None
 

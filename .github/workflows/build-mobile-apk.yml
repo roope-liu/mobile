@@ -105,7 +105,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Build APK
-        run: flet build apk --yes
+        run: flet build apk --yes --android-legacy-packaging
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
