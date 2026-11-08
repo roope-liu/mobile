@@ -149,9 +149,15 @@ def _main(page: ft.Page) -> None:
         state.play_series_id = series_id
 
         previous = history_service.get(series_id) if series_id else None
-        state.resume_ms = int(previous.get("position_ms") or 0) if previous and str(previous.get("vid") or "") == str(vid) else 0
+        state.resume_ms = 0
+        state.last_duration_ms = 0
+        if previous and str(previous.get("vid") or "") == str(vid):
+            position = int(previous.get("position_ms") or 0)
+            duration = int(previous.get("duration_ms") or 0)
+            if position > 1000 and not (duration and position >= duration - 10000):
+                state.resume_ms = position
+                state.last_duration_ms = duration
         state.last_position_ms = state.resume_ms
-        state.last_duration_ms = int((previous or {}).get("duration_ms") or 0)
         history_service.upsert(
             series_id, series_name, cover, episode, vid, vid_list,
             position_ms=state.resume_ms,

@@ -685,8 +685,14 @@ def player_view(state, handlers, page=None):
             return
         if state.current_view != "player":
             return
-        if int(state.last_position_ms or 0) < 1000:
-            _set_status("视频未能正常播放，已停止自动续播。")
+        position = int(state.last_position_ms or 0)
+        duration = int(state.last_duration_ms or 0)
+        finished = (
+            (duration > 0 and position >= duration - 8000)
+            or (duration <= 0 and position >= 10000)
+        )
+        if not finished:
+            _set_status("播放提前结束，已停止自动续播。")
             return
         _save_position(force=True)
         try:
