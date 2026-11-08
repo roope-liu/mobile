@@ -154,7 +154,7 @@ def _main(page: ft.Page) -> None:
         if previous and str(previous.get("vid") or "") == str(vid):
             position = int(previous.get("position_ms") or 0)
             duration = int(previous.get("duration_ms") or 0)
-            if position > 1000 and not (duration and position >= duration - 10000):
+            if position > 1000 and duration > 0 and position < duration - 10000:
                 state.resume_ms = position
                 state.last_duration_ms = duration
         state.last_position_ms = state.resume_ms

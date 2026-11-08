@@ -426,6 +426,7 @@ def player_view(state, handlers, page=None):
     )
 
     last_save = {"ts": 0.0}
+    loaded_at = {"ts": 0.0}
 
     def _save_worker(series_id, vid, ms, duration) -> None:
         try:
@@ -470,6 +471,9 @@ def player_view(state, handlers, page=None):
             return
         state.last_position_ms = _position_ms(e.data)
         _save_position()
+        duration = int(state.last_duration_ms or 0)
+        if duration > 0 and state.last_position_ms >= duration - 1200:
+            _on_complete(e)
 
     def _on_duration(e) -> None:
         state.last_duration_ms = _position_ms(e.data)
@@ -542,6 +546,7 @@ def player_view(state, handlers, page=None):
         _set_status(f"播放错误：{getattr(e, 'data', '')}")
 
     def _on_load(e) -> None:
+        loaded_at["ts"] = time.time()
         _set_status("")
         resume = int(state.resume_ms or 0)
         state.resume_ms = 0
@@ -601,22 +606,51 @@ def player_view(state, handlers, page=None):
         on = fullscreen_state["on"]
         fullscreen_icon.name = ft.Icons.FULLSCREEN_EXIT if on else ft.Icons.FULLSCREEN
         try:
-            status.visible = not on
-            status.update()
+            from app.platform import is_mobile
+
+            mobile = is_mobile()
         except Exception:  # noqa: BLE001
-            pass
-        try:
-            if page is not None:
-                page.window.full_screen = on
-                page.update()
-        except Exception:  # noqa: BLE001
-            pass
+            mobile = False
+        if mobile:
+            try:
+                video.fullscreen = on
+                video.update()
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            try:
+                status.visible = not on
+                status.update()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if page is not None:
+                    page.window.full_screen = on
+                    page.update()
+            except Exception:  # noqa: BLE001
+                pass
         try:
             fullscreen_icon.update()
         except Exception:  # noqa: BLE001
             pass
 
     fullscreen_button.on_click = _toggle_fullscreen
+
+    def _on_enter_fullscreen(e) -> None:
+        fullscreen_state["on"] = True
+        fullscreen_icon.name = ft.Icons.FULLSCREEN_EXIT
+        try:
+            fullscreen_icon.update()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_exit_fullscreen(e) -> None:
+        fullscreen_state["on"] = False
+        fullscreen_icon.name = ft.Icons.FULLSCREEN
+        try:
+            fullscreen_icon.update()
+        except Exception:  # noqa: BLE001
+            pass
 
     episodes = [str(v) for v in ((state.current_drama or {}).get("vid_list") or [])]
     episode_icon = ft.Icon(ft.Icons.PLAYLIST_PLAY, color=ft.Colors.WHITE, size=22)
@@ -736,12 +770,14 @@ def player_view(state, handlers, page=None):
             return
         position = int(state.last_position_ms or 0)
         duration = int(state.last_duration_ms or 0)
+        elapsed = time.time() - loaded_at["ts"] if loaded_at["ts"] else 0.0
         finished = (
             (duration > 0 and position >= duration - 8000)
             or (duration <= 0 and position >= 10000)
+            or (duration > 0 and elapsed >= duration * 0.7)
+            or (duration <= 0 and elapsed >= 6)
         )
         if not finished:
-            _set_status("播放提前结束，已停止自动续播。")
             return
         _save_position(force=True)
         try:
@@ -795,6 +831,8 @@ def player_view(state, handlers, page=None):
         on_position_change=_on_position,
         on_duration_change=_on_duration,
         on_complete=_on_complete,
+        on_enter_fullscreen=_on_enter_fullscreen,
+        on_exit_fullscreen=_on_exit_fullscreen,
     )
 
     stack = ft.Stack(
