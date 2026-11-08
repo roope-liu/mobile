@@ -400,6 +400,8 @@ def detail_view(state, handlers, page=None):
 
 
 def player_view(state, handlers, page=None):
+    import threading
+
     from app.services import history_service
     from app.services.playback_service import stream_base
 
@@ -422,6 +424,12 @@ def player_view(state, handlers, page=None):
 
     last_save = {"ts": 0.0}
 
+    def _save_worker(series_id, vid, ms, duration) -> None:
+        try:
+            history_service.save_position(series_id, vid, ms, duration)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _save_position(force: bool = False) -> None:
         ms = int(state.last_position_ms or 0)
         if not state.play_series_id or ms <= 0:
@@ -430,12 +438,16 @@ def player_view(state, handlers, page=None):
         if not force and now - last_save["ts"] < 4:
             return
         last_save["ts"] = now
-        try:
-            history_service.save_position(
-                state.play_series_id, state.play_vid, ms, int(state.last_duration_ms or 0)
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        threading.Thread(
+            target=_save_worker,
+            args=(
+                state.play_series_id,
+                state.play_vid,
+                ms,
+                int(state.last_duration_ms or 0),
+            ),
+            daemon=True,
+        ).start()
 
     def _go_back(e=None) -> None:
         _save_position(force=True)
@@ -489,52 +501,6 @@ def player_view(state, handlers, page=None):
     )
     volume_button = ft.IconButton(icon=volume_icon, tooltip="静音/恢复")
 
-    controls = ft_video.types.MaterialVideoControls(
-        display_seek_bar=True,
-        seek_gesture=True,
-        volume_gesture=True,
-        brightness_gesture=True,
-        seek_on_double_tap=True,
-        top_button_bar=[
-            ft.IconButton(
-                icon=ft.Icons.ARROW_BACK,
-                icon_color=ft.Colors.WHITE,
-                tooltip="返回",
-                on_click=_go_back,
-            )
-        ],
-        bottom_button_bar=[
-            ft_video.types.VideoPlayOrPauseButton(),
-            ft_video.types.VideoSpacer(),
-            ft_video.types.VideoPositionIndicator(),
-            ft.Container(
-                content=ft.Row(
-                    [volume_button, volume_slider],
-                    spacing=0,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                height=40,
-            ),
-            ft_video.types.VideoFullscreenButton(),
-        ],
-        button_bar_button_size=30,
-    )
-
-    video = ft_video.Video(
-        playlist=playlist,
-        autoplay=True,
-        fit=ft.BoxFit.CONTAIN,
-        expand=True,
-        wakelock=True,
-        muted=False,
-        volume=100,
-        controls=controls,
-        on_error=_on_error,
-        on_load=_on_load,
-        on_position_change=_on_position,
-        on_duration_change=_on_duration,
-    )
-
     def _apply_volume(value: float) -> None:
         volume_state["value"] = float(value)
         video.volume = float(value)
@@ -564,19 +530,166 @@ def player_view(state, handlers, page=None):
     volume_slider.on_change = _on_volume_slider
     volume_button.on_click = _toggle_mute
 
+    fullscreen_state = {"on": False}
+    fullscreen_icon = ft.Icon(ft.Icons.FULLSCREEN, color=ft.Colors.WHITE, size=22)
+    fullscreen_button = ft.IconButton(icon=fullscreen_icon, tooltip="全屏/窗口")
+
+    def _toggle_fullscreen(e=None) -> None:
+        fullscreen_state["on"] = not fullscreen_state["on"]
+        on = fullscreen_state["on"]
+        fullscreen_icon.name = ft.Icons.FULLSCREEN_EXIT if on else ft.Icons.FULLSCREEN
+        try:
+            status.visible = not on
+            status.update()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if page is not None:
+                page.window.full_screen = on
+                page.update()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            fullscreen_icon.update()
+        except Exception:  # noqa: BLE001
+            pass
+
+    fullscreen_button.on_click = _toggle_fullscreen
+
+    episodes = [str(v) for v in ((state.current_drama or {}).get("vid_list") or [])]
+    episode_icon = ft.Icon(ft.Icons.PLAYLIST_PLAY, color=ft.Colors.WHITE, size=22)
+    episode_button = ft.IconButton(icon=episode_icon, tooltip="选集")
+
+    def _open_episodes(e=None) -> None:
+        if not episodes or page is None:
+            _set_status("当前剧集没有可用的选集列表")
+            return
+        per_page = 30
+        pages_total = max(1, (len(episodes) + per_page - 1) // per_page)
+        pager = {"index": max(0, (int(state.play_episode or 1) - 1) // per_page)}
+        holder = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, height=320)
+        info = ft.Text("", size=12, color="#4C5D73")
+
+        def pick(index: int) -> None:
+            try:
+                page.pop_dialog()
+            except Exception:  # noqa: BLE001
+                pass
+            handlers["on_play"](index + 1, episodes[index])
+
+        def render() -> None:
+            start = pager["index"] * per_page
+            end = min(len(episodes), start + per_page)
+            current = int(state.play_episode or 0)
+            buttons = []
+            for i in range(start, end):
+                number = i + 1
+                selected = number == current
+                buttons.append(
+                    ft.Container(
+                        content=ft.Text(
+                            f"第{number}集",
+                            size=12,
+                            color=ft.Colors.WHITE if selected else "#2F3F55",
+                            weight=ft.FontWeight.W_500,
+                        ),
+                        bgcolor="#2F80ED" if selected else "#EFF4FB",
+                        border_radius=8,
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                        on_click=lambda e, idx=i: pick(idx),
+                    )
+                )
+            holder.controls = [ft.Row(buttons, wrap=True, spacing=8, run_spacing=8)]
+            info.value = f"第 {pager['index'] + 1}/{pages_total} 页 · 共 {len(episodes)} 集"
+            try:
+                holder.update()
+                info.update()
+            except Exception:  # noqa: BLE001
+                pass
+
+        def go(delta: int) -> None:
+            pager["index"] = max(0, min(pages_total - 1, pager["index"] + delta))
+            render()
+
+        pagination = ft.Row(
+            [
+                ft.TextButton("上一页", on_click=lambda e: go(-1)),
+                info,
+                ft.TextButton("下一页", on_click=lambda e: go(1)),
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        )
+        dialog = ft.AlertDialog(
+            title=ft.Text("选集", size=16, weight=ft.FontWeight.BOLD),
+            content=ft.Container(
+                width=320,
+                content=ft.Column([holder, pagination], spacing=10),
+            ),
+            actions=[ft.TextButton("关闭", on_click=lambda e: page.pop_dialog())],
+        )
+        render()
+        page.show_dialog(dialog)
+
+    episode_button.on_click = _open_episodes
+
+    def _on_complete(e) -> None:
+        _save_position(force=True)
+        try:
+            handlers.get("on_play_next")()
+        except Exception:  # noqa: BLE001
+            pass
+
+    controls = ft_video.types.MaterialVideoControls(
+        display_seek_bar=True,
+        seek_gesture=True,
+        volume_gesture=True,
+        brightness_gesture=True,
+        seek_on_double_tap=True,
+        top_button_bar=[
+            ft.IconButton(
+                icon=ft.Icons.ARROW_BACK,
+                icon_color=ft.Colors.WHITE,
+                tooltip="返回",
+                on_click=_go_back,
+            )
+        ],
+        bottom_button_bar=[
+            ft_video.types.VideoPlayOrPauseButton(),
+            ft_video.types.VideoSpacer(),
+            ft_video.types.VideoPositionIndicator(),
+            episode_button,
+            ft.Container(
+                content=ft.Row(
+                    [volume_button, volume_slider],
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                height=40,
+            ),
+            fullscreen_button,
+        ],
+        button_bar_button_size=30,
+    )
+
+    video = ft_video.Video(
+        playlist=playlist,
+        autoplay=True,
+        fit=ft.BoxFit.CONTAIN,
+        expand=True,
+        wakelock=True,
+        muted=False,
+        volume=100,
+        controls=controls,
+        on_error=_on_error,
+        on_load=_on_load,
+        on_position_change=_on_position,
+        on_duration_change=_on_duration,
+        on_complete=_on_complete,
+    )
+
     stack = ft.Stack(
         [
             ft.Container(content=video, expand=True, bgcolor=ft.Colors.BLACK),
-            ft.Container(
-                content=ft.IconButton(
-                    icon=ft.Icons.ARROW_BACK,
-                    icon_color=ft.Colors.WHITE,
-                    bgcolor="#66000000",
-                    on_click=_go_back,
-                ),
-                left=8,
-                top=8,
-            ),
             ft.Container(content=status, left=12, right=12, bottom=72),
         ],
         expand=True,
@@ -585,6 +698,44 @@ def player_view(state, handlers, page=None):
 
 
 def loading_view(state, handlers, page=None):
+    import asyncio
+
+    msg = ft.Text(state.loading_message or "正在准备视频…", size=14, color="#33455C")
+    hint = ft.Text("首次播放需下载并解密，耗时取决于网速", size=11, color="#6B7D94")
+    bar = ft.ProgressBar(
+        value=max(0, min(100, int(state.loading_progress or 0))) / 100,
+        color="#2F80ED",
+        bgcolor="#DDE8F7",
+        width=240,
+    )
+    percent_text = ft.Text(
+        f"{max(0, min(100, int(state.loading_progress or 0)))}%",
+        size=12,
+        color="#4C5D73",
+    )
+
+    async def _poll():
+        while True:
+            if state.current_view != "loading":
+                return
+            try:
+                msg.value = state.loading_message or "正在准备视频…"
+                value = max(0, min(100, int(state.loading_progress or 0)))
+                bar.value = value / 100
+                percent_text.value = f"{value}%"
+                msg.update()
+                bar.update()
+                percent_text.update()
+            except Exception:  # noqa: BLE001
+                return
+            await asyncio.sleep(0.35)
+
+    if page is not None:
+        try:
+            page.run_task(_poll)
+        except Exception:  # noqa: BLE001
+            pass
+
     return ft.SafeArea(
         ft.Column(
             [
@@ -598,11 +749,14 @@ def loading_view(state, handlers, page=None):
                     content=ft.Column(
                         [
                             ft.ProgressRing(),
-                            ft.Text(state.loading_message or "正在准备视频…", size=13, color=ft.Colors.GREY),
-                            ft.Text("首次播放需要在本机解密并合并音视频，通常 3~20 秒", size=11, color=ft.Colors.GREY),
+                            msg,
+                            ft.Row([bar, percent_text], spacing=10,
+                                   alignment=ft.MainAxisAlignment.CENTER,
+                                   width=320),
+                            hint,
                         ],
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=12,
+                        spacing=14,
                     ),
                     expand=True,
                     alignment=ft.Alignment.CENTER,

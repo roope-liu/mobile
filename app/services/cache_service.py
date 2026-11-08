@@ -7,7 +7,7 @@ from app.storage import data_dir
 
 _INDEX_NAME = "cache_index.json"
 _UNKNOWN_NAME = "未知剧名（旧缓存）"
-_TEMP_SUFFIXES = (".enc", ".dec", ".tmp")
+_TEMP_SUFFIXES = (".enc", ".dec", ".tmp", ".dec.mp4")
 
 
 def videos_dir() -> str:

@@ -109,7 +109,10 @@ def _main(page: ft.Page) -> None:
             page.run_thread(lambda: prepare_stream(vids[0]))
 
     def on_back(e=None) -> None:
-        state.current_view = "home"
+        if state.current_view in ("player", "loading") and state.current_drama:
+            state.current_view = "detail"
+        else:
+            state.current_view = "home"
         rerender()
 
     def on_play(episode: int, vid: str) -> None:
@@ -123,6 +126,7 @@ def _main(page: ft.Page) -> None:
         state.play_url = ""
         state.error_message = ""
         state.loading_message = ""
+        state.loading_progress = 0
         state.play_info = ""
         state.play_episode = int(episode)
         state.play_vid = str(vid or "")
@@ -151,7 +155,8 @@ def _main(page: ft.Page) -> None:
 
         if find_ffmpeg():
             state.current_view = "loading"
-            state.loading_message = f"正在下载并解密第{episode}集（首次约 20MB）…"
+            state.loading_message = f"正在准备第{episode}集…"
+            state.loading_progress = 0
             rerender()
 
             def play_fallback(reason: str) -> None:
@@ -176,10 +181,15 @@ def _main(page: ft.Page) -> None:
                     state.current_view = "player"
                     rerender()
 
+            def on_progress(percent: int, text: str) -> None:
+                state.loading_progress = int(percent)
+                state.loading_message = text
+
             def play_local():
                 try:
                     path = local_video_path(
-                        vid, series_name=series_name, episode=episode
+                        vid, series_name=series_name, episode=episode,
+                        progress_cb=on_progress,
                     )
                     state.play_url = Path(path).as_uri()
                     state.play_info = describe_streams(path, find_ffmpeg() or "")
@@ -254,6 +264,13 @@ def _main(page: ft.Page) -> None:
         }
         on_play(episode, vid)
 
+    def on_play_next(e=None) -> None:
+        drama = state.current_drama or {}
+        vids = [str(v) for v in (drama.get("vid_list") or [])]
+        episode = int(state.play_episode or 0)
+        if 0 < episode < len(vids):
+            on_play(episode + 1, vids[episode])
+
     def on_clear_cache_all(e=None) -> None:
         from app.services import cache_service
 
@@ -287,6 +304,7 @@ def _main(page: ft.Page) -> None:
             "on_play": on_play,
             "on_open_settings": on_open_settings,
             "on_resume": on_resume,
+            "on_play_next": on_play_next,
             "on_clear_cache_all": on_clear_cache_all,
             "on_clear_cache_drama": on_clear_cache_drama,
             "on_clear_history": on_clear_history,

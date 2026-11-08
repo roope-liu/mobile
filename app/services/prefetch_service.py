@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.services import cache_service
 
-_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="prefetch")
+_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch")
 _LOCK = threading.Lock()
 _INFLIGHT: set = set()
 

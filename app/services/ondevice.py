@@ -430,7 +430,7 @@ class _TLSAdapter(requests.adapters.HTTPAdapter):
         return super().proxy_manager_for(*args, **kwargs)
 
 
-def _download_once(url, dest, ssl_context=None):
+def _download_once(url, dest, ssl_context=None, on_progress=None):
     session = requests.Session()
     if ssl_context is not None:
         session.mount("https://", _TLSAdapter(ssl_context))
@@ -446,10 +446,19 @@ def _download_once(url, dest, ssl_context=None):
             timeout=(20, 180),
         ) as resp:
             resp.raise_for_status()
+            total = int(resp.headers.get("Content-Length") or 0)
+            done = 0
+            last_report = 0.0
             with open(dest, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=64 * 1024):
-                    if chunk:
-                        f.write(chunk)
+                for chunk in resp.iter_content(chunk_size=256 * 1024):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    done += len(chunk)
+                    now = time.time()
+                    if on_progress and (now - last_report >= 0.25 or (total and done >= total)):
+                        last_report = now
+                        on_progress(done, total)
     finally:
         session.close()
     if not os.path.exists(dest) or os.path.getsize(dest) == 0:
@@ -465,7 +474,7 @@ def _tls12_context(verify=True):
     return ctx
 
 
-def _download(url, dest):
+def _download(url, dest, on_progress=None):
     """下载带签名的 CDN 视频，兼容 Android 对部分 CDN TLS 连接的重置。"""
     attempts = (
         ("默认 TLS", None),
@@ -475,7 +484,7 @@ def _download(url, dest):
     last_error = None
     for label, ctx in attempts:
         try:
-            _download_once(url, dest, ctx)
+            _download_once(url, dest, ctx, on_progress)
             return
         except Exception as exc:  # noqa: BLE001
             last_error = exc
@@ -486,6 +495,29 @@ def _download(url, dest):
                 pass
             time.sleep(1.0)
     raise RuntimeError(f"视频下载失败（{label}）：{last_error}")
+
+
+def _ffmpeg_decrypt(enc_path, out_path, key_hex, ffmpeg, audio=False) -> bool:
+    """用 ffmpeg 原生解密 CENC（比纯 Python 快几十倍）。失败返回 False。"""
+    cmd = [ffmpeg, "-y", "-loglevel", "error"]
+    if key_hex:
+        cmd += ["-decryption_key", key_hex]
+    cmd += ["-i", enc_path]
+    if audio:
+        cmd += ["-map", "0:a:0", "-vn"]
+    else:
+        cmd += ["-map", "0:v:0", "-map", "0:a?"]
+    cmd += ["-c", "copy"]
+    if not audio:
+        cmd += ["-tag:v", "hvc1", "-movflags", "+faststart"]
+    cmd += ["-f", "mp4", out_path]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=180, creationflags=_NO_WINDOW)
+    except Exception:  # noqa: BLE001
+        return False
+    return (result.returncode == 0 and os.path.exists(out_path)
+            and os.path.getsize(out_path) > 0)
 
 
 def _mux_files(ffmpeg, video_path, audio_path, out_path):
@@ -523,20 +555,31 @@ def _decrypt_to(enc_path, key_hex, dec_path):
     return enc_path
 
 
-def local_video_path(vid, quality="worst", series_name="", episode=0) -> str:
-    """返回可直接给播放器使用的本地 MP4 路径；首次调用会下载解密并合并音视频。"""
+def local_video_path(vid, quality="worst", series_name="", episode=0,
+                     progress_cb=None) -> str:
+    """返回可直接给播放器使用的本地 MP4 路径；首次调用会下载解密并合并音视频。
+
+    progress_cb(percent:int, text:str) 用于报告下载/解密进度。
+    """
     vid = str(vid or "").strip()
     if not vid:
         raise ValueError("vid 为空")
+
+    def emit(percent, text):
+        if progress_cb:
+            try:
+                progress_cb(int(percent), text)
+            except Exception:  # noqa: BLE001
+                pass
 
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         raise RuntimeError("未找到 ffmpeg（手机端需打包 ffmpeg）")
 
-    cache = cache_service.videos_dir()
     out = cache_service.final_path(vid)
     if os.path.exists(out) and os.path.getsize(out) > 0:
         cache_service.record(vid, series_name, episode)
+        emit(100, "已命中本地缓存")
         return out
 
     track = _pick_track(resolve_tracks(vid))
@@ -556,22 +599,46 @@ def local_video_path(vid, quality="worst", series_name="", episode=0) -> str:
 
     enc = out + ".v.enc"
     dec = out + ".v.dec"
+    vdec = out + ".v.dec.mp4"
     aenc = out + ".a.enc"
     adec = out + ".a.dec"
+    adec_mp4 = out + ".a.dec.mp4"
     tmp = out + ".tmp"
-    cleanup = (enc, dec, aenc, adec, tmp)
+    cleanup = (enc, dec, vdec, aenc, adec, adec_mp4, tmp)
+
+    def download_progress(base, span, label):
+        def cb(done, total):
+            if total:
+                pct = done * 100 // total
+                emit(base + span * done / total, f"正在下载{label} {pct}%")
+            else:
+                emit(base, f"正在下载{label}…")
+        return cb
+
     try:
-        _download(track["main_url"], enc)
-        video_input = _decrypt_to(enc, key, dec)
+        _download(track["main_url"], enc,
+                  download_progress(2, 58, "视频"))
+        emit(62, "正在解密视频…")
+        video_input = vdec
+        if not (key and _ffmpeg_decrypt(enc, vdec, key, ffmpeg)):
+            video_input = _decrypt_to(enc, key, dec)
 
         audio_input = None
         if audio_track:
-            _download(audio_track["main_url"], aenc)
-            audio_input = _decrypt_to(aenc, unwrap_spade(audio_key) if audio_key else "", adec)
+            _download(audio_track["main_url"], aenc,
+                      download_progress(64, 20, "音频"))
+            audio_key_hex = unwrap_spade(audio_key) if audio_key else ""
+            emit(86, "正在解密音频…")
+            audio_input = adec_mp4
+            if not (audio_key_hex and _ffmpeg_decrypt(
+                    aenc, adec_mp4, audio_key_hex, ffmpeg, audio=True)):
+                audio_input = _decrypt_to(aenc, audio_key_hex, adec)
 
+        emit(92, "正在合并音视频…")
         _mux_files(ffmpeg, video_input, audio_input, tmp)
         os.replace(tmp, out)
         cache_service.record(vid, series_name, episode)
+        emit(100, "准备完成")
     except RuntimeError:
         if codec != "bytevc1":
             raise RuntimeError("该清晰度使用 bytevc2 编码，手机端无法转换为 hvc1")
