@@ -604,7 +604,7 @@ def player_view(state, handlers, page=None):
     def _toggle_fullscreen(e=None) -> None:
         fullscreen_state["on"] = not fullscreen_state["on"]
         on = fullscreen_state["on"]
-        fullscreen_icon.name = ft.Icons.FULLSCREEN_EXIT if on else ft.Icons.FULLSCREEN
+        _set_fs_icons(on)
         try:
             from app.platform import is_mobile
 
@@ -636,21 +636,27 @@ def player_view(state, handlers, page=None):
 
     fullscreen_button.on_click = _toggle_fullscreen
 
+    top_fullscreen_icon = ft.Icon(ft.Icons.FULLSCREEN, color=ft.Colors.WHITE, size=22)
+    top_fullscreen_button = ft.IconButton(
+        icon=top_fullscreen_icon, tooltip="全屏", on_click=_toggle_fullscreen,
+    )
+
+    def _set_fs_icons(on: bool) -> None:
+        name = ft.Icons.FULLSCREEN_EXIT if on else ft.Icons.FULLSCREEN
+        for icon in (fullscreen_icon, top_fullscreen_icon):
+            icon.name = name
+            try:
+                icon.update()
+            except Exception:  # noqa: BLE001
+                pass
+
     def _on_enter_fullscreen(e) -> None:
         fullscreen_state["on"] = True
-        fullscreen_icon.name = ft.Icons.FULLSCREEN_EXIT
-        try:
-            fullscreen_icon.update()
-        except Exception:  # noqa: BLE001
-            pass
+        _set_fs_icons(True)
 
     def _on_exit_fullscreen(e) -> None:
         fullscreen_state["on"] = False
-        fullscreen_icon.name = ft.Icons.FULLSCREEN
-        try:
-            fullscreen_icon.update()
-        except Exception:  # noqa: BLE001
-            pass
+        _set_fs_icons(False)
 
     episodes = [str(v) for v in ((state.current_drama or {}).get("vid_list") or [])]
     episode_icon = ft.Icon(ft.Icons.PLAYLIST_PLAY, color=ft.Colors.WHITE, size=22)
@@ -778,6 +784,7 @@ def player_view(state, handlers, page=None):
             or (duration <= 0 and elapsed >= 6)
         )
         if not finished:
+            completion["done"] = False
             return
         _save_position(force=True)
         try:
@@ -797,21 +804,15 @@ def player_view(state, handlers, page=None):
                 icon_color=ft.Colors.WHITE,
                 tooltip="返回",
                 on_click=_go_back,
-            )
+            ),
+            top_fullscreen_button,
         ],
         bottom_button_bar=[
             ft_video.types.VideoPlayOrPauseButton(),
             ft_video.types.VideoSpacer(),
             ft_video.types.VideoPositionIndicator(),
             episode_button,
-            ft.Container(
-                content=ft.Row(
-                    [volume_button, volume_slider],
-                    spacing=0,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                height=40,
-            ),
+            volume_button,
             fullscreen_button,
         ],
         button_bar_button_size=30,
@@ -834,6 +835,40 @@ def player_view(state, handlers, page=None):
         on_enter_fullscreen=_on_enter_fullscreen,
         on_exit_fullscreen=_on_exit_fullscreen,
     )
+
+    async def _watch_playback():
+        import asyncio
+
+        while True:
+            await asyncio.sleep(1.5)
+            if view_token != int(state.play_token or 0):
+                return
+            if state.current_view != "player":
+                return
+            if completion["done"]:
+                return
+            try:
+                duration = await video.get_duration()
+                state.last_duration_ms = _position_ms(duration)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                position = await video.get_current_position()
+                state.last_position_ms = _position_ms(position)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                done = await video.is_completed()
+            except Exception:  # noqa: BLE001
+                done = False
+            if done:
+                _on_complete(None)
+
+    if page is not None:
+        try:
+            page.run_task(_watch_playback)
+        except Exception:  # noqa: BLE001
+            pass
 
     stack = ft.Stack(
         [
