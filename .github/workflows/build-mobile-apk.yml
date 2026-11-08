@@ -66,6 +66,7 @@ jobs:
               --disable-ffprobe --disable-ffplay --enable-ffmpeg --enable-small \
               --disable-x86asm \
               --enable-protocol=file --enable-demuxer=mov --enable-demuxer=aac --enable-muxer=mp4 \
+              --enable-muxer=null \
               --enable-parser=hevc --enable-parser=aac --enable-bsf=aac_adtstoasc \
               --enable-decoder=hevc \
               --extra-cflags="-fPIE" --extra-ldflags="-static -pie"

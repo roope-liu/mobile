@@ -17,6 +17,7 @@ class AppState:
     play_series_id: str = ""
     play_episode: int = 0
     play_vid: str = ""
+    play_token: int = 0
     resume_ms: int = 0
     last_position_ms: int = 0
     last_duration_ms: int = 0

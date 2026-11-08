@@ -5,6 +5,7 @@ import ssl
 import struct
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 
@@ -555,8 +556,51 @@ def _decrypt_to(enc_path, key_hex, dec_path):
     return enc_path
 
 
+_VID_LOCKS = {}
+_VID_LOCKS_GUARD = threading.Lock()
+
+
+def _vid_lock(vid):
+    with _VID_LOCKS_GUARD:
+        lock = _VID_LOCKS.get(vid)
+        if lock is None:
+            lock = threading.Lock()
+            _VID_LOCKS[vid] = lock
+        return lock
+
+
 def local_video_path(vid, quality="worst", series_name="", episode=0,
                      progress_cb=None) -> str:
+    vid = str(vid or "").strip()
+    if not vid:
+        raise ValueError("vid 为空")
+    with _vid_lock(vid):
+        return _build_local_video(vid, quality, series_name, episode, progress_cb)
+
+
+def _validate_media(path, ffmpeg, audio=False) -> bool:
+    """解码少量帧，确认文件真的可播放（防止未真正解密却被缓存）。"""
+    try:
+        cmd = [ffmpeg, "-v", "error"]
+        if audio:
+            cmd += ["-i", path, "-map", "0:a:0", "-frames:a", "3"]
+        else:
+            cmd += ["-i", path, "-map", "0:v:0", "-frames:v", "3"]
+        cmd += ["-f", "null", "-"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                                creationflags=_NO_WINDOW)
+        err = (result.stderr or "").strip()
+        if "not a suitable output format" in err or "Unknown muxer" in err:
+            return True
+        return result.returncode == 0 and not err
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_VALIDATED_VIDS = set()
+
+
+def _build_local_video(vid, quality, series_name, episode, progress_cb) -> str:
     """返回可直接给播放器使用的本地 MP4 路径；首次调用会下载解密并合并音视频。
 
     progress_cb(percent:int, text:str) 用于报告下载/解密进度。
@@ -578,9 +622,15 @@ def local_video_path(vid, quality="worst", series_name="", episode=0,
 
     out = cache_service.final_path(vid)
     if os.path.exists(out) and os.path.getsize(out) > 0:
-        cache_service.record(vid, series_name, episode)
-        emit(100, "已命中本地缓存")
-        return out
+        if vid in _VALIDATED_VIDS or _validate_media(out, ffmpeg):
+            _VALIDATED_VIDS.add(vid)
+            cache_service.record(vid, series_name, episode)
+            emit(100, "已命中本地缓存")
+            return out
+        try:
+            os.remove(out)
+        except OSError:
+            pass
 
     track = _pick_track(resolve_tracks(vid))
     if not track or not track.get("main_url"):
@@ -620,7 +670,9 @@ def local_video_path(vid, quality="worst", series_name="", episode=0,
                   download_progress(2, 58, "视频"))
         emit(62, "正在解密视频…")
         video_input = vdec
-        if not (key and _ffmpeg_decrypt(enc, vdec, key, ffmpeg)):
+        if not (key and _ffmpeg_decrypt(enc, vdec, key, ffmpeg)
+                and _validate_media(vdec, ffmpeg)):
+            emit(66, "正在解密视频（兼容模式，稍慢）…")
             video_input = _decrypt_to(enc, key, dec)
 
         audio_input = None
@@ -630,13 +682,17 @@ def local_video_path(vid, quality="worst", series_name="", episode=0,
             audio_key_hex = unwrap_spade(audio_key) if audio_key else ""
             emit(86, "正在解密音频…")
             audio_input = adec_mp4
-            if not (audio_key_hex and _ffmpeg_decrypt(
-                    aenc, adec_mp4, audio_key_hex, ffmpeg, audio=True)):
+            if not (audio_key_hex
+                    and _ffmpeg_decrypt(aenc, adec_mp4, audio_key_hex, ffmpeg, audio=True)
+                    and _validate_media(adec_mp4, ffmpeg, audio=True)):
                 audio_input = _decrypt_to(aenc, audio_key_hex, adec)
 
         emit(92, "正在合并音视频…")
         _mux_files(ffmpeg, video_input, audio_input, tmp)
+        if not _validate_media(tmp, ffmpeg):
+            raise RuntimeError("成片校验失败：解密结果无法解码，请重试或改用代理播放")
         os.replace(tmp, out)
+        _VALIDATED_VIDS.add(vid)
         cache_service.record(vid, series_name, episode)
         emit(100, "准备完成")
     except RuntimeError:

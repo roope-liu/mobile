@@ -59,6 +59,7 @@ def _main(page: ft.Page) -> None:
         page.update()
 
     def on_search() -> None:
+        state.play_token += 1
         state.error_message = ""
         try:
             from app.services.search_service import search_dramas
@@ -71,6 +72,7 @@ def _main(page: ft.Page) -> None:
         rerender()
 
     def on_open_detail(series_id) -> None:
+        state.play_token += 1
         drama = None
         state.error_message = ""
         try:
@@ -100,7 +102,11 @@ def _main(page: ft.Page) -> None:
 
             def prefetch():
                 try:
-                    local_video_path(vid)
+                    local_video_path(
+                        vid,
+                        series_name=str(drama.get("series_name") or ""),
+                        episode=1,
+                    )
                 except Exception:  # noqa: BLE001
                     pass
 
@@ -109,6 +115,7 @@ def _main(page: ft.Page) -> None:
             page.run_thread(lambda: prepare_stream(vids[0]))
 
     def on_back(e=None) -> None:
+        state.play_token += 1
         if state.current_view in ("player", "loading") and state.current_drama:
             state.current_view = "detail"
         else:
@@ -124,6 +131,8 @@ def _main(page: ft.Page) -> None:
 
         state.play_title = f"第{episode}集"
         state.play_url = ""
+        state.play_token += 1
+        token = state.play_token
         state.error_message = ""
         state.loading_message = ""
         state.loading_progress = 0
@@ -160,6 +169,8 @@ def _main(page: ft.Page) -> None:
             rerender()
 
             def play_fallback(reason: str) -> None:
+                if token != state.play_token:
+                    return
                 state.error_message = reason
                 state.play_url = resolve_play_url(vid) or ""
                 if stream_base():
@@ -169,6 +180,8 @@ def _main(page: ft.Page) -> None:
 
                     def prepare_fallback():
                         ready = prepare_stream(vid)
+                        if token != state.play_token:
+                            return
                         state.loading_message = ""
                         if not ready:
                             state.error_message = (state.error_message + " 流代理准备也失败了。").strip()
@@ -182,6 +195,8 @@ def _main(page: ft.Page) -> None:
                     rerender()
 
             def on_progress(percent: int, text: str) -> None:
+                if token != state.play_token:
+                    return
                 state.loading_progress = int(percent)
                 state.loading_message = text
 
@@ -191,6 +206,8 @@ def _main(page: ft.Page) -> None:
                         vid, series_name=series_name, episode=episode,
                         progress_cb=on_progress,
                     )
+                    if token != state.play_token:
+                        return
                     state.play_url = Path(path).as_uri()
                     state.play_info = describe_streams(path, find_ffmpeg() or "")
                     state.loading_message = ""
@@ -212,6 +229,8 @@ def _main(page: ft.Page) -> None:
 
             def prepare():
                 ready = prepare_stream(vid)
+                if token != state.play_token:
+                    return
                 if ready:
                     state.loading_message = ""
                     state.current_view = "player"
@@ -239,6 +258,7 @@ def _main(page: ft.Page) -> None:
         rerender()
 
     def on_open_settings(e=None) -> None:
+        state.play_token += 1
         state.current_view = "settings"
         rerender()
 
@@ -265,6 +285,8 @@ def _main(page: ft.Page) -> None:
         on_play(episode, vid)
 
     def on_play_next(e=None) -> None:
+        if state.current_view != "player":
+            return
         drama = state.current_drama or {}
         vids = [str(v) for v in (drama.get("vid_list") or [])]
         episode = int(state.play_episode or 0)

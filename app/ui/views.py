@@ -405,6 +405,9 @@ def player_view(state, handlers, page=None):
     from app.services import history_service
     from app.services.playback_service import stream_base
 
+    view_token = int(state.play_token or 0)
+    completion = {"done": False}
+
     playlist = []
     if state.play_url:
         playlist.append(ft_video.types.VideoMedia(resource=state.play_url))
@@ -463,11 +466,53 @@ def player_view(state, handlers, page=None):
             return 0
 
     def _on_position(e) -> None:
+        if view_token != int(state.play_token or 0):
+            return
         state.last_position_ms = _position_ms(e.data)
         _save_position()
 
     def _on_duration(e) -> None:
         state.last_duration_ms = _position_ms(e.data)
+
+    if not playlist:
+        return ft.SafeArea(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.IconButton(
+                                icon=ft.Icons.ARROW_BACK,
+                                on_click=handlers["on_back"],
+                            ),
+                            ft.Text(state.play_title or "播放",
+                                    size=16, weight=ft.FontWeight.BOLD),
+                        ]
+                    ),
+                    ft.Container(
+                        expand=True,
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Column(
+                            [
+                                ft.Icon(ft.Icons.ERROR_OUTLINE, size=40, color="#C2413B"),
+                                ft.Text(
+                                    state.error_message or "视频地址为空，无法播放。",
+                                    size=13,
+                                    color="#33455C",
+                                    text_align=ft.TextAlign.CENTER,
+                                ),
+                                ft.Text("可返回重试，或在设置中配置播放代理。",
+                                        size=12, color="#6B7D94"),
+                            ],
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=10,
+                        ),
+                    ),
+                ],
+                expand=True,
+                spacing=8,
+            ),
+            expand=True,
+        )
 
     def _set_status(text: str) -> None:
         try:
@@ -633,6 +678,16 @@ def player_view(state, handlers, page=None):
     episode_button.on_click = _open_episodes
 
     def _on_complete(e) -> None:
+        if completion["done"]:
+            return
+        completion["done"] = True
+        if view_token != int(state.play_token or 0):
+            return
+        if state.current_view != "player":
+            return
+        if int(state.last_position_ms or 0) < 1000:
+            _set_status("视频未能正常播放，已停止自动续播。")
+            return
         _save_position(force=True)
         try:
             handlers.get("on_play_next")()
