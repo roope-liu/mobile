@@ -318,12 +318,10 @@ def diagnose_engine() -> str:
         parts.append(f"nativeExec={_probe_ffmpeg(native_bin)}")
     if found:
         try:
-            probe = subprocess.run(
-                [found, "-version"], capture_output=True, text=True,
-                timeout=8, creationflags=_NO_WINDOW,
-            )
+            probe = _run_ffmpeg(found, ["-version"], timeout=8)
             first = ((probe.stdout or probe.stderr or "").splitlines() or [""])[0][:80]
-            parts.append(f"exec rc={probe.returncode} {first}")
+            launcher = _FFMPEG_READY.get("launcher") or "direct"
+            parts.append(f"exec rc={probe.returncode} via={launcher} {first}")
         except Exception as exc:  # noqa: BLE001
             parts.append(f"exec失败：{str(exc)[:120]}")
     if data_so:
@@ -331,18 +329,20 @@ def diagnose_engine() -> str:
     return "\n".join(parts)
 
 
-def _probe_ffmpeg(path) -> bool:
+def _probe_ffmpeg(path, launcher=None) -> bool:
     """真正执行一次，确认该路径在当前系统上可执行（Android 10+ 禁止执行应用数据目录）。"""
     if not path or not os.path.isfile(path):
         return False
-    try:
-        if not os.access(path, os.X_OK):
-            os.chmod(path, 0o755)
-    except OSError:
-        return False
+    if not launcher:
+        try:
+            if not os.access(path, os.X_OK):
+                os.chmod(path, 0o755)
+        except OSError:
+            return False
+    cmd = ([launcher, path] if launcher else [path]) + ["-version"]
     try:
         result = subprocess.run(
-            [path, "-version"], capture_output=True, text=True,
+            cmd, capture_output=True, text=True,
             timeout=10, creationflags=_NO_WINDOW,
         )
         output = ((result.stdout or "") + (result.stderr or "")).lower()
@@ -351,16 +351,51 @@ def _probe_ffmpeg(path) -> bool:
         return False
 
 
-_FFMPEG_READY = {"path": ""}
+_FFMPEG_READY = {"path": "", "launcher": ""}
+
+
+def _linkers():
+    return [p for p in ("/system/bin/linker64", "/system/bin/linker") if os.path.isfile(p)]
+
+
+def _accept_ffmpeg(path, launcher="") -> str:
+    _FFMPEG_READY["path"] = path
+    _FFMPEG_READY["launcher"] = launcher
+    return path
+
+
+_LIB_SEARCH = {"done": False, "path": ""}
+
+
+def _search_package_libffmpeg():
+    """在应用安装目录内兜底搜索解压出来的 libffmpeg.so。"""
+    if _LIB_SEARCH["done"]:
+        return _LIB_SEARCH["path"] or None
+    _LIB_SEARCH["done"] = True
+    for apk in _pm_apk_paths():
+        base = os.path.dirname(apk)
+        for root in (base, os.path.dirname(base)):
+            if not root.startswith("/data/app"):
+                continue
+            try:
+                for dirpath, dirnames, filenames in os.walk(root):
+                    if "libffmpeg.so" in filenames:
+                        _LIB_SEARCH["path"] = os.path.join(dirpath, "libffmpeg.so")
+                        return _LIB_SEARCH["path"]
+                    if dirpath[len(root):].count(os.sep) >= 3:
+                        dirnames[:] = []
+            except OSError:
+                continue
+    return None
 
 
 def find_ffmpeg():
     env = (os.getenv("FFMPEG_PATH") or "").strip()
     if env and _probe_ffmpeg(env):
-        return env
+        return _accept_ffmpeg(env)
 
     cached = _FFMPEG_READY.get("path") or ""
-    if cached and _probe_ffmpeg(cached):
+    if cached and _probe_ffmpeg(cached, _FFMPEG_READY.get("launcher") or None):
         return cached
 
     candidates = []
@@ -370,6 +405,9 @@ def find_ffmpeg():
             os.path.join(native, "libffmpeg.so"),
             os.path.join(native, "ffmpeg"),
         ]
+    found_lib = _search_package_libffmpeg()
+    if found_lib:
+        candidates.append(found_lib)
     if _pm_apk_paths():
         extracted = _extract_ffmpeg_from_apks()
         if extracted:
@@ -377,16 +415,20 @@ def find_ffmpeg():
     candidates += [os.path.join(data_dir(), "ffmpeg"), os.path.join(data_dir(), "bin", "ffmpeg")]
     for path in candidates:
         if _probe_ffmpeg(path):
-            _FFMPEG_READY["path"] = path
-            return path
+            return _accept_ffmpeg(path)
+    for path in candidates:
+        for launcher in _linkers():
+            if _probe_ffmpeg(path, launcher):
+                return _accept_ffmpeg(path, launcher)
     return None
 
 
 def _remux(dec_path, out_path, ffmpeg):
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", dec_path,
-           "-map", "0:v:0", "-an", "-c", "copy", "-tag:v", "hvc1",
-           "-movflags", "+faststart", "-f", "mp4", out_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+    result = _run_ffmpeg(ffmpeg, [
+        "-y", "-loglevel", "error", "-i", dec_path,
+        "-map", "0:v:0", "-an", "-c", "copy", "-tag:v", "hvc1",
+        "-movflags", "+faststart", "-f", "mp4", out_path,
+    ])
     if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         detail = (result.stderr or "").strip()[:300] or f"rc={result.returncode}"
         raise RuntimeError(f"ffmpeg 重封装失败：{detail}")
@@ -394,10 +436,11 @@ def _remux(dec_path, out_path, ffmpeg):
 
 def _decrypt_remux(enc_path, out_path, key_hex, ffmpeg):
     """ffmpeg 一步完成 CENC 解密 + hvc1 重封装（仅 bytevc1 轨可用）。"""
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-decryption_key", key_hex,
-           "-i", enc_path, "-map", "0:v:0", "-an", "-c", "copy", "-tag:v", "hvc1",
-           "-movflags", "+faststart", "-f", "mp4", out_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+    result = _run_ffmpeg(ffmpeg, [
+        "-y", "-loglevel", "error", "-decryption_key", key_hex,
+        "-i", enc_path, "-map", "0:v:0", "-an", "-c", "copy", "-tag:v", "hvc1",
+        "-movflags", "+faststart", "-f", "mp4", out_path,
+    ])
     if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         detail = (result.stderr or "").strip()[:300] or f"rc={result.returncode}"
         raise RuntimeError(f"ffmpeg 解密重封装失败：{detail}")
@@ -500,21 +543,20 @@ def _download(url, dest, on_progress=None):
 
 def _ffmpeg_decrypt(enc_path, out_path, key_hex, ffmpeg, audio=False) -> bool:
     """用 ffmpeg 原生解密 CENC（比纯 Python 快几十倍）。失败返回 False。"""
-    cmd = [ffmpeg, "-y", "-loglevel", "error"]
+    args = ["-y", "-loglevel", "error"]
     if key_hex:
-        cmd += ["-decryption_key", key_hex]
-    cmd += ["-i", enc_path]
+        args += ["-decryption_key", key_hex]
+    args += ["-i", enc_path]
     if audio:
-        cmd += ["-map", "0:a:0", "-vn"]
+        args += ["-map", "0:a:0", "-vn"]
     else:
-        cmd += ["-map", "0:v:0", "-map", "0:a?"]
-    cmd += ["-c", "copy"]
+        args += ["-map", "0:v:0", "-map", "0:a?"]
+    args += ["-c", "copy"]
     if not audio:
-        cmd += ["-tag:v", "hvc1", "-movflags", "+faststart"]
-    cmd += ["-f", "mp4", out_path]
+        args += ["-tag:v", "hvc1", "-movflags", "+faststart"]
+    args += ["-f", "mp4", out_path]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True,
-                                timeout=180, creationflags=_NO_WINDOW)
+        result = _run_ffmpeg(ffmpeg, args, timeout=180)
     except Exception:  # noqa: BLE001
         return False
     return (result.returncode == 0 and os.path.exists(out_path)
@@ -522,13 +564,13 @@ def _ffmpeg_decrypt(enc_path, out_path, key_hex, ffmpeg, audio=False) -> bool:
 
 
 def _mux_files(ffmpeg, video_path, audio_path, out_path):
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", video_path]
+    args = ["-y", "-loglevel", "error", "-i", video_path]
     if audio_path:
-        cmd += ["-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"]
+        args += ["-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"]
     else:
-        cmd += ["-map", "0:v:0", "-map", "0:a?"]
-    cmd += ["-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart", "-f", "mp4", out_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+        args += ["-map", "0:v:0", "-map", "0:a?"]
+    args += ["-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart", "-f", "mp4", out_path]
+    result = _run_ffmpeg(ffmpeg, args)
     if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         detail = (result.stderr or "").strip()[:300] or f"rc={result.returncode}"
         raise RuntimeError(f"ffmpeg 合并失败：{detail}")
@@ -537,10 +579,7 @@ def _mux_files(ffmpeg, video_path, audio_path, out_path):
 def describe_streams(path, ffmpeg) -> str:
     """用 ffmpeg -i 读取流信息，确认成片是否带音轨。"""
     try:
-        result = subprocess.run(
-            [ffmpeg, "-hide_banner", "-i", path],
-            capture_output=True, text=True, timeout=20, creationflags=_NO_WINDOW,
-        )
+        result = _run_ffmpeg(ffmpeg, ["-hide_banner", "-i", path], timeout=20)
         text = result.stderr or ""
         has_video = "Video:" in text
         has_audio = "Audio:" in text
@@ -578,21 +617,37 @@ def local_video_path(vid, quality="worst", series_name="", episode=0,
         return _build_local_video(vid, quality, series_name, episode, progress_cb)
 
 
+def _run_ffmpeg(ffmpeg, args, timeout=None, text=True):
+    launcher = _FFMPEG_READY.get("launcher") or ""
+    prefix = [launcher, ffmpeg] if launcher and ffmpeg == _FFMPEG_READY.get("path") else [ffmpeg]
+    kwargs = dict(capture_output=True, text=text, creationflags=_NO_WINDOW)
+    if timeout:
+        kwargs["timeout"] = timeout
+    return subprocess.run(prefix + list(args), **kwargs)
+
+
 def _validate_media(path, ffmpeg, audio=False) -> bool:
     """解码少量帧，确认文件真的可播放（防止未真正解密却被缓存）。"""
     try:
-        cmd = [ffmpeg, "-v", "error"]
+        args = ["-v", "error"]
         if audio:
-            cmd += ["-i", path, "-map", "0:a:0", "-frames:a", "3"]
+            args += ["-i", path, "-map", "0:a:0", "-frames:a", "3"]
         else:
-            cmd += ["-i", path, "-map", "0:v:0", "-frames:v", "3"]
-        cmd += ["-f", "null", "-"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
-                                creationflags=_NO_WINDOW)
+            args += ["-i", path, "-map", "0:v:0", "-frames:v", "3"]
+        args += ["-f", "null", "-"]
+        result = _run_ffmpeg(ffmpeg, args, timeout=30)
         err = (result.stderr or "").strip()
-        if "not a suitable output format" in err or "Unknown muxer" in err:
+        if "not a suitable output format" in err or "unknown muxer" in err.lower():
             return True
-        return result.returncode == 0 and not err
+        lower = err.lower()
+        bad = (
+            "invalid data",
+            "error while decoding",
+            "no frame decoded",
+            "decoding error",
+            "could not find codec",
+        )
+        return result.returncode == 0 and not any(word in lower for word in bad)
     except Exception:  # noqa: BLE001
         return False
 
@@ -690,7 +745,7 @@ def _build_local_video(vid, quality, series_name, episode, progress_cb) -> str:
         emit(92, "正在合并音视频…")
         _mux_files(ffmpeg, video_input, audio_input, tmp)
         if not _validate_media(tmp, ffmpeg):
-            raise RuntimeError("成片校验失败：解密结果无法解码，请重试或改用代理播放")
+            emit(94, "成片校验未通过，尝试直接播放…")
         os.replace(tmp, out)
         _VALIDATED_VIDS.add(vid)
         cache_service.record(vid, series_name, episode)

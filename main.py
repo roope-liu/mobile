@@ -178,8 +178,8 @@ def _main(page: ft.Page) -> None:
                 if token != state.play_token:
                     return
                 state.error_message = reason
-                state.play_url = resolve_play_url(vid) or ""
                 if stream_base():
+                    state.play_url = resolve_play_url(vid) or ""
                     state.current_view = "loading"
                     state.loading_message = "本地播放失败，正在请求流代理准备视频…"
                     rerender()
@@ -196,6 +196,7 @@ def _main(page: ft.Page) -> None:
 
                     page.run_thread(prepare_fallback)
                 else:
+                    state.play_url = ""
                     state.loading_message = ""
                     state.current_view = "player"
                     rerender()
@@ -226,9 +227,8 @@ def _main(page: ft.Page) -> None:
             page.run_thread(play_local)
             return
 
-        state.play_url = resolve_play_url(vid) or ""
-
         if stream_base():
+            state.play_url = resolve_play_url(vid) or ""
             state.current_view = "loading"
             state.loading_message = "正在请求流代理准备视频…"
             rerender()
@@ -258,6 +258,8 @@ def _main(page: ft.Page) -> None:
                     "未找到可执行的本地解码引擎：Android 10+ 禁止直接执行应用数据目录中的程序。"
                     "请安装启用 native 库解压的新版本，或在设置中配置播放代理。"
                 )
+            else:
+                state.play_url = resolve_play_url(vid) or ""
         except Exception:  # noqa: BLE001
             pass
         state.current_view = "player"

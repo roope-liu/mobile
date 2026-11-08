@@ -502,6 +502,23 @@ def player_view(state, handlers, page=None):
                                 ),
                                 ft.Text("可返回重试，或在设置中配置播放代理。",
                                         size=12, color="#6B7D94"),
+                                ft.Row(
+                                    [
+                                        ft.FilledButton(
+                                            "重试",
+                                            on_click=lambda e: handlers["on_play"](
+                                                int(state.play_episode or 1),
+                                                str(state.play_vid or ""),
+                                            ),
+                                        ),
+                                        ft.OutlinedButton(
+                                            "打开设置",
+                                            on_click=handlers.get("on_open_settings"),
+                                        ),
+                                    ],
+                                    alignment=ft.MainAxisAlignment.CENTER,
+                                    spacing=10,
+                                ),
                             ],
                             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                             spacing=10,
@@ -609,11 +626,20 @@ def player_view(state, handlers, page=None):
         if not episodes or page is None:
             _set_status("当前剧集没有可用的选集列表")
             return
-        per_page = 30
+        per_page = 20
+        columns = 4
         pages_total = max(1, (len(episodes) + per_page - 1) // per_page)
         pager = {"index": max(0, (int(state.play_episode or 1) - 1) // per_page)}
-        holder = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, height=320)
-        info = ft.Text("", size=12, color="#4C5D73")
+        grid = ft.Column(spacing=6)
+        total_text = ft.Text(
+            f"共 {len(episodes)} 集", size=12, color="#4C5D73",
+            text_align=ft.TextAlign.LEFT,
+        )
+        page_text = ft.Text(
+            "", size=12, color="#4C5D73", text_align=ft.TextAlign.LEFT,
+        )
+        prev_btn = ft.OutlinedButton("上一页", on_click=lambda e: go(-1))
+        next_btn = ft.OutlinedButton("下一页", on_click=lambda e: go(1))
 
         def pick(index: int) -> None:
             try:
@@ -626,29 +652,44 @@ def player_view(state, handlers, page=None):
             start = pager["index"] * per_page
             end = min(len(episodes), start + per_page)
             current = int(state.play_episode or 0)
-            buttons = []
-            for i in range(start, end):
-                number = i + 1
-                selected = number == current
-                buttons.append(
-                    ft.Container(
-                        content=ft.Text(
-                            f"第{number}集",
-                            size=12,
-                            color=ft.Colors.WHITE if selected else "#2F3F55",
-                            weight=ft.FontWeight.W_500,
-                        ),
-                        bgcolor="#2F80ED" if selected else "#EFF4FB",
-                        border_radius=8,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
-                        on_click=lambda e, idx=i: pick(idx),
+            rows = []
+            for row_start in range(start, end, columns):
+                cells = []
+                for idx in range(row_start, row_start + columns):
+                    if idx >= end:
+                        cells.append(ft.Container(width=54, height=34))
+                        continue
+                    number = idx + 1
+                    selected = number == current
+                    cells.append(
+                        ft.Container(
+                            width=54,
+                            height=34,
+                            alignment=ft.Alignment.CENTER,
+                            bgcolor="#2F80ED" if selected else "#EFF4FB",
+                            border_radius=8,
+                            content=ft.Text(
+                                str(number),
+                                size=13,
+                                color=ft.Colors.WHITE if selected else "#2F3F55",
+                                weight=ft.FontWeight.W_500,
+                            ),
+                            on_click=lambda e, i=idx: pick(i),
+                        )
                     )
+                rows.append(
+                    ft.Row(cells, spacing=6,
+                           alignment=ft.MainAxisAlignment.START)
                 )
-            holder.controls = [ft.Row(buttons, wrap=True, spacing=8, run_spacing=8)]
-            info.value = f"第 {pager['index'] + 1}/{pages_total} 页 · 共 {len(episodes)} 集"
+            grid.controls = rows
+            page_text.value = f"{pager['index'] + 1} / {pages_total}"
+            prev_btn.disabled = pager["index"] <= 0
+            next_btn.disabled = pager["index"] >= pages_total - 1
             try:
-                holder.update()
-                info.update()
+                grid.update()
+                page_text.update()
+                prev_btn.update()
+                next_btn.update()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -656,19 +697,27 @@ def player_view(state, handlers, page=None):
             pager["index"] = max(0, min(pages_total - 1, pager["index"] + delta))
             render()
 
-        pagination = ft.Row(
-            [
-                ft.TextButton("上一页", on_click=lambda e: go(-1)),
-                info,
-                ft.TextButton("下一页", on_click=lambda e: go(1)),
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        )
         dialog = ft.AlertDialog(
-            title=ft.Text("选集", size=16, weight=ft.FontWeight.BOLD),
+            title=ft.Text("选集", size=15, weight=ft.FontWeight.BOLD,
+                          text_align=ft.TextAlign.LEFT),
             content=ft.Container(
-                width=320,
-                content=ft.Column([holder, pagination], spacing=10),
+                width=250,
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [total_text, ft.Container(expand=True), page_text],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        grid,
+                        ft.Row(
+                            [prev_btn, next_btn],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=12,
+                        ),
+                    ],
+                    spacing=10,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
             ),
             actions=[ft.TextButton("关闭", on_click=lambda e: page.pop_dialog())],
         )
