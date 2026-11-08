@@ -861,6 +861,10 @@ def player_view(state, handlers, page=None):
                 done = await video.is_completed()
             except Exception:  # noqa: BLE001
                 done = False
+            duration_ms = int(state.last_duration_ms or 0)
+            position_ms = int(state.last_position_ms or 0)
+            if not done and duration_ms > 0 and position_ms >= duration_ms - 1500:
+                done = True
             if done:
                 _on_complete(None)
 
