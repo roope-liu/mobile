@@ -126,13 +126,14 @@ def _main(page: ft.Page) -> None:
         from pathlib import Path
 
         from app.services import history_service, prefetch_service
-        from app.services.ondevice import describe_streams, find_ffmpeg, local_video_path
+        from app.services.ondevice import describe_streams, find_ffmpeg, local_video_path, video_landscape
         from app.services.playback_service import prepare_stream, resolve_play_url, stream_base
 
         state.play_title = f"第{episode}集"
         state.play_url = ""
         state.play_token += 1
         token = state.play_token
+        state.video_landscape = False
         state.error_message = ""
         state.loading_message = ""
         state.loading_progress = 0
@@ -217,6 +218,10 @@ def _main(page: ft.Page) -> None:
                         return
                     state.play_url = Path(path).as_uri()
                     state.play_info = describe_streams(path, find_ffmpeg() or "")
+                    try:
+                        state.video_landscape = video_landscape(path, find_ffmpeg() or "")
+                    except Exception:  # noqa: BLE001
+                        state.video_landscape = False
                     state.loading_message = ""
                     state.current_view = "player"
                     rerender()

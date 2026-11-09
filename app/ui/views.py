@@ -556,107 +556,63 @@ def player_view(state, handlers, page=None):
             except Exception:  # noqa: BLE001
                 pass
 
-    volume_icon = ft.Icon(ft.Icons.VOLUME_UP, color=ft.Colors.WHITE, size=22)
-    volume_state = {"value": 100.0}
-    volume_slider = ft.Slider(
-        min=0,
-        max=100,
-        value=100,
-        width=96,
-        active_color=ft.Colors.WHITE,
-        inactive_color="#66FFFFFF",
-    )
-    volume_button = ft.IconButton(icon=volume_icon, tooltip="静音/恢复")
-
-    def _apply_volume(value: float) -> None:
-        volume_state["value"] = float(value)
-        video.volume = float(value)
-        video.muted = float(value) <= 0
-        volume_icon.name = (
-            ft.Icons.VOLUME_OFF
-            if float(value) <= 0
-            else (ft.Icons.VOLUME_DOWN if float(value) < 50 else ft.Icons.VOLUME_UP)
-        )
-        try:
-            video.update()
-            volume_icon.update()
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _on_volume_slider(e) -> None:
-        _apply_volume(float(e.control.value))
-
-    def _toggle_mute(e) -> None:
-        _apply_volume(0 if volume_state["value"] > 0 else 100)
-        volume_slider.value = volume_state["value"]
-        try:
-            volume_slider.update()
-        except Exception:  # noqa: BLE001
-            pass
-
-    volume_slider.on_change = _on_volume_slider
-    volume_button.on_click = _toggle_mute
-
     fullscreen_state = {"on": False}
     fullscreen_icon = ft.Icon(ft.Icons.FULLSCREEN, color=ft.Colors.WHITE, size=22)
-    fullscreen_button = ft.IconButton(icon=fullscreen_icon, tooltip="全屏/窗口")
+    fullscreen_button = ft.IconButton(icon=fullscreen_icon, tooltip="全屏")
+
+    def _set_orientation(fullscreen: bool) -> None:
+        if page is None:
+            return
+
+        async def run():
+            try:
+                orientations = ft.DeviceOrientation
+                if not fullscreen:
+                    allowed = [
+                        orientations.PORTRAIT_UP,
+                        orientations.PORTRAIT_DOWN,
+                    ]
+                elif state.video_landscape:
+                    allowed = [
+                        orientations.LANDSCAPE_LEFT,
+                        orientations.LANDSCAPE_RIGHT,
+                    ]
+                else:
+                    allowed = [
+                        orientations.PORTRAIT_UP,
+                        orientations.PORTRAIT_DOWN,
+                    ]
+                await page.set_allowed_device_orientations(allowed)
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            page.run_task(run)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _toggle_fullscreen(e=None) -> None:
         fullscreen_state["on"] = not fullscreen_state["on"]
         on = fullscreen_state["on"]
-        _set_fs_icons(on)
+        fullscreen_icon.name = ft.Icons.FULLSCREEN_EXIT if on else ft.Icons.FULLSCREEN
         try:
-            from app.platform import is_mobile
-
-            mobile = is_mobile()
+            status.visible = not on
+            status.update()
         except Exception:  # noqa: BLE001
-            mobile = False
-        if mobile:
-            try:
-                video.fullscreen = on
-                video.update()
-            except Exception:  # noqa: BLE001
-                pass
-        else:
-            try:
-                status.visible = not on
-                status.update()
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                if page is not None:
-                    page.window.full_screen = on
-                    page.update()
-            except Exception:  # noqa: BLE001
-                pass
+            pass
         try:
             fullscreen_icon.update()
         except Exception:  # noqa: BLE001
             pass
-
-    fullscreen_button.on_click = _toggle_fullscreen
-
-    top_fullscreen_icon = ft.Icon(ft.Icons.FULLSCREEN, color=ft.Colors.WHITE, size=22)
-    top_fullscreen_button = ft.IconButton(
-        icon=top_fullscreen_icon, tooltip="全屏", on_click=_toggle_fullscreen,
-    )
-
-    def _set_fs_icons(on: bool) -> None:
-        name = ft.Icons.FULLSCREEN_EXIT if on else ft.Icons.FULLSCREEN
-        for icon in (fullscreen_icon, top_fullscreen_icon):
-            icon.name = name
+        if page is not None:
             try:
-                icon.update()
+                page.window.full_screen = on
+                page.update()
             except Exception:  # noqa: BLE001
                 pass
+        _set_orientation(on)
 
-    def _on_enter_fullscreen(e) -> None:
-        fullscreen_state["on"] = True
-        _set_fs_icons(True)
-
-    def _on_exit_fullscreen(e) -> None:
-        fullscreen_state["on"] = False
-        _set_fs_icons(False)
+    fullscreen_button.on_click = _toggle_fullscreen
 
     episodes = [str(v) for v in ((state.current_drama or {}).get("vid_list") or [])]
     episode_icon = ft.Icon(ft.Icons.PLAYLIST_PLAY, color=ft.Colors.WHITE, size=22)
@@ -805,14 +761,21 @@ def player_view(state, handlers, page=None):
                 tooltip="返回",
                 on_click=_go_back,
             ),
-            top_fullscreen_button,
+            ft.Container(
+                content=ft.Text(
+                    f"第{int(state.play_episode or 1)}集",
+                    size=14,
+                    color=ft.Colors.WHITE,
+                    weight=ft.FontWeight.W_500,
+                    text_align=ft.TextAlign.LEFT,
+                ),
+                padding=ft.Padding.only(left=6),
+            ),
         ],
         bottom_button_bar=[
-            ft_video.types.VideoPlayOrPauseButton(),
-            ft_video.types.VideoSpacer(),
             ft_video.types.VideoPositionIndicator(),
+            ft_video.types.VideoSpacer(),
             episode_button,
-            volume_button,
             fullscreen_button,
         ],
         button_bar_button_size=30,
@@ -832,8 +795,6 @@ def player_view(state, handlers, page=None):
         on_position_change=_on_position,
         on_duration_change=_on_duration,
         on_complete=_on_complete,
-        on_enter_fullscreen=_on_enter_fullscreen,
-        on_exit_fullscreen=_on_exit_fullscreen,
     )
 
     async def _watch_playback():

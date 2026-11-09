@@ -576,6 +576,18 @@ def _mux_files(ffmpeg, video_path, audio_path, out_path):
         raise RuntimeError(f"ffmpeg 合并失败：{detail}")
 
 
+def video_landscape(path, ffmpeg) -> bool:
+    """读取成片分辨率，判断内容是否为横屏（宽>高）。"""
+    try:
+        result = _run_ffmpeg(ffmpeg, ["-hide_banner", "-i", path], timeout=20)
+        match = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", result.stderr or "")
+        if match:
+            return int(match.group(1)) > int(match.group(2))
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def describe_streams(path, ffmpeg) -> str:
     """用 ffmpeg -i 读取流信息，确认成片是否带音轨。"""
     try:
