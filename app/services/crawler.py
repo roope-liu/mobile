@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 
 import requests
 
@@ -22,6 +23,7 @@ from flurl.core import core_sixgod  # noqa: E402
 
 SITE = "https://hongguoduanju.com"
 SEARCH_URL = "https://api5-normal-sinfonlinec.fqnovel.com/reading/bookapi/search/tab/v"
+WEB_SEARCH_URL = f"{SITE}/api/search/result"
 WEB_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -72,12 +74,12 @@ def _get_tls12_session():
     return _tls12_session
 
 
-def _http_get(url, headers, timeout=(8, 20)):
+def _http_get(url, headers, timeout=(8, 20), params=None):
     """带重试与 TLS1.2 回退的 GET，兼容部分 Android 设备对 TLS 的重置。"""
     last_error = None
     for session in (_session, _get_tls12_session(), _session):
         try:
-            resp = session.get(url, headers=headers, timeout=timeout)
+            resp = session.get(url, headers=headers, timeout=timeout, params=params)
             resp.raise_for_status()
             return resp
         except Exception as exc:  # noqa: BLE001
@@ -274,6 +276,45 @@ class HongguoCrawler:
         """归一化名称用于相关性匹配：去空白与常见标点。"""
         return re.sub(r"[\s：:·《》【】\[\]()（）,，.。!！?？\-—_]+", "", str(text or "")).lower()
 
+    def _web_search_once(self, keyword: str, page: int = 1) -> dict:
+        """调用官网 Web 搜索接口（无需 App 签名，作为 App 接口失效时的替代）。"""
+        params = {"aid": "8662", "query": keyword}
+        if page > 1:
+            params["page"] = str(page)
+        headers = {
+            "User-Agent": WEB_UA,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{SITE}/search?keyword={quote(keyword)}",
+        }
+        resp = _http_get(WEB_SEARCH_URL, headers=headers, timeout=(8, 20), params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("Web 搜索接口返回格式异常")
+        return payload
+
+    def _search_web(self, keyword: str, max_pages: int = 2, enough_hits: int = 6) -> list:
+        """官网 Web 搜索：按页抓取 searchList，归一化并去重。"""
+        key = self._norm_name(keyword)
+        results = []
+        seen = set()
+        for page in range(1, max_pages + 1):
+            payload = self._web_search_once(keyword, page=page)
+            for cell in payload.get("searchList") or []:
+                video_data = cell.get("video_data") if isinstance(cell, dict) else None
+                if not isinstance(video_data, dict) or not video_data.get("series_id"):
+                    continue
+                item = normalize_series(video_data)
+                sid = item.get("series_id")
+                if sid and sid not in seen:
+                    seen.add(sid)
+                    results.append(item)
+            matched = sum(1 for it in results
+                          if key and key in self._norm_name(it.get("series_name")))
+            if matched >= enough_hits or not payload.get("hasMore"):
+                break
+        return self._rank_by_relevance(results, keyword)
+
     def search(self, keyword: str, passback: str = "", count: int = 20,
                max_pages: int = 2, page_size: int = 20,
                enough_hits: int = 6) -> list:
@@ -294,6 +335,16 @@ class HongguoCrawler:
             cached = _cache_get(cache_key)
             if cached is not None:
                 return cached
+
+        # 优先使用官网 Web 搜索接口；App 接口签名失效时仍可正常搜索。
+        if not passback:
+            try:
+                ranked = self._search_web(keyword, max_pages=max_pages, enough_hits=enough_hits)
+                if ranked:
+                    _cache_set(cache_key, ranked)
+                    return ranked
+            except Exception:  # noqa: BLE001 - 回退到 App 搜索接口
+                pass
 
         key = self._norm_name(keyword)
         results = []
